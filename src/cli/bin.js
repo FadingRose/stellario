@@ -47,18 +47,12 @@ export const status = tool(defs.status)
 const INJECTOR_PLUGIN = `import type { Plugin } from "@opencode-ai/plugin"
 import { buildStatus } from "stellario/defs/workspace"
 
-export default (async ({ directory, project }) => {
+export default (async ({ directory }) => {
   return {
-    "experimental.chat.system.transform": (messages) => {
-      // Inject workspace status (including dynamic prompt) into the first system message
-      if (!messages || messages.length === 0) return
-
+    "experimental.chat.system.transform": async (_input, output) => {
       try {
         const status = buildStatus(directory, "stellario")
-        const systemMsg = messages.find((m) => m.role === "system")
-        if (systemMsg) {
-          systemMsg.content = systemMsg.content + "\\n\\n" + status
-        }
+        output.system.push(status)
       } catch {
         // Memory not initialized yet — silently skip
       }
