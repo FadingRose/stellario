@@ -172,3 +172,52 @@ tags: ``
 author: stellario
 
 ---
+
+## m04
+
+## Design Decisions — Key Architectural Choices
+
+### 1. JSONL over Database
+
+Decision: Use JSONL (JSON Lines) files for storage instead of SQLite or a database.
+Rationale: Zero dependencies for storage, human-readable, easy git versioning, works with any filesystem. Trade-off: no indexing or complex queries — compensated by Telescope search with scoring.
+
+### 2. Pure Definitions (ToolDef) with Glue Files
+
+Decision: Export pure description + args + execute objects, not opencode-coupled tools.
+Rationale: Stellario has zero runtime dependency on opencode. Host projects write 2-line glue files that bridge to @opencode-ai/plugin. This means Stellario can be used outside opencode.
+
+### 3. Profile-Based Behavior
+
+Decision: Five named profiles instead of individual boolean flags.
+Rationale: Named profiles are self-documenting and prevent invalid combinations (e.g., append that allows revisions). The ProfileBehavior interface derives the actual flags.
+
+### 4. Volume Index (volumes.jsonl)
+
+Decision: Central index file tracking per-volume metadata (file lists, next nonce, active workspace).
+Rationale: Enables multi-file volumes, efficient ID generation (nonce-based instead of scanning), and workspace tracking without scanning all entries.
+
+### 5. Config in .opencode/ Directory
+
+Decision: Prefer .opencode/stellario.yaml over root-level config.
+Rationale: Keeps agent infrastructure separate from project code. CLI init command follows this convention.
+
+### 6. Markdown Mirror for Tracked Volumes
+
+Decision: Auto-generate .md files alongside .jsonl for tracked volumes.
+Rationale: Provides human-readable view of memory contents. Useful for debugging and manual inspection.
+
+### 7. Git Inside Memory Directory
+
+Decision: Separate git repo inside the memory directory, not the project repo.
+Rationale: Memory has its own versioning lifecycle. Avoids polluting project git history with memory changes.
+
+### 8. CLI as Pure JS (No Build Step)
+
+Decision: bin.js is plain JavaScript, not compiled TypeScript.
+Rationale: The CLI is a scaffolding tool used rarely. Pure JS means zero build step and direct execution via node.
+
+tags: ``
+author: stellario
+
+---
