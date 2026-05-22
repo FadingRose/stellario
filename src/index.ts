@@ -2,3 +2,4 @@
 export { getMemoryToolDefs } from "./defs/memory-defs.js"
 export { getWorkspaceToolDefs, buildStatus } from "./defs/workspace-defs.js"
 export { getTelescopeToolDefs } from "./defs/telescope-defs.ts"
+export * as embedding from "./embedding.js"

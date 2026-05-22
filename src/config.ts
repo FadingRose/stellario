@@ -108,11 +108,21 @@ function validateConfig(raw: any, sourcePath: string): StellarioConfig {
     }
   }
 
+  // Embedding (optional)
+  let embedding: StellarioConfig["embedding"]
+  if (raw.embedding && typeof raw.embedding === "object") {
+    embedding = {
+      enabled: raw.embedding.enabled,
+      model: raw.embedding.model,
+    }
+  }
+
   return {
     memoryDir: raw.memoryDir || ".stellario",
     volumes,
     agents,
     tags: raw.tags,
+    embedding,
   }
 }
 

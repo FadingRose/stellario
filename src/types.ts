@@ -81,6 +81,13 @@ export interface TagConfig {
   typeValues?: string[]
 }
 
+export interface EmbeddingConfig {
+  /** Whether semantic search is enabled. Default: "auto" (probe at runtime). */
+  enabled?: boolean | "auto"
+  /** HuggingFace model ID for embeddings. Default: "Xenova/all-MiniLM-L6-v2". */
+  model?: string
+}
+
 export interface StellarioConfig {
   /** Directory for JSONL data, relative to project root. Default: ".stellario" */
   memoryDir?: string
@@ -90,6 +97,8 @@ export interface StellarioConfig {
   agents: Record<string, AgentDef>
   /** Tag vocabulary configuration. */
   tags?: TagConfig
+  /** Semantic search / embedding configuration. */
+  embedding?: EmbeddingConfig
 }
 
 // ─── Storage Types ──────────────────────────────────────────────────────────

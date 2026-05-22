@@ -29,3 +29,8 @@ agents:
   stellario:
     display: "Stellario"
     role: primary
+
+# Semantic search configuration (optional)
+# embedding:
+#   enabled: auto       # auto | true | false
+#   model: "Xenova/all-MiniLM-L6-v2"

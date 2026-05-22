@@ -3,6 +3,13 @@ import type { ToolContext, MemoryEntry, ToolDef } from "../types.js"
 import { resolveContext } from "../context.js"
 import { resolveAgent, canRead } from "../permissions.js"
 import { readJsonl, extractTitle, truncate, ensureStringArray } from "../store.js"
+import {
+  probeEmbeddingAvailability,
+  semanticSearch,
+  rebuildIndex,
+  indexExists,
+  setModelId,
+} from "../embedding.js"
 import { existsSync } from "fs"
 
 // =============================================================================
@@ -15,6 +22,42 @@ interface SearchResult {
   score: number
 }
 
+/**
+ * Enhanced fzf-style text matching.
+ * Scores based on where the match is found (ID > tag > keyword > content).
+ */
+function fzfSignal(entry: MemoryEntry, terms: string[]): number {
+  const contentLower = entry.content.toLowerCase()
+  const tagsLower = entry.tags.map((t) => t.toLowerCase())
+  const keywordsLower = (entry.keywords || []).map((k) => k.toLowerCase())
+  const idLower = entry.id.toLowerCase()
+
+  let totalScore = 0
+
+  for (const term of terms) {
+    const termLower = term.toLowerCase()
+    let termScore = 0
+
+    // ID exact match (highest signal)
+    if (idLower === termLower) termScore += 10
+    // Tag match
+    for (const tag of tagsLower) {
+      if (tag.includes(termLower)) { termScore += 6; break }
+    }
+    // Keyword match
+    for (const kw of keywordsLower) {
+      if (kw.includes(termLower)) { termScore += 5; break }
+    }
+    // Content match
+    if (contentLower.includes(termLower)) termScore += 3
+
+    totalScore += termScore
+  }
+
+  return totalScore
+}
+
+/** Legacy textMatch for backwards compatibility (unused but kept as reference). */
 function textMatch(entry: MemoryEntry, terms: string[]): number {
   const text = `${entry.content} ${entry.tags.join(" ")} ${(entry.keywords || []).join(" ")}`.toLowerCase()
   let score = 0
@@ -50,7 +93,7 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
   const search: ToolDef = {
     description:
       "Unified search across memory entries. " +
-      "Supports text matching, tag filtering, and keyword discovery. " +
+      "Supports text matching, semantic search, tag filtering, and keyword discovery. " +
       "Use returns='tags' or returns='keywords' to enumerate values.",
     args: {
       query: z.string().optional()
@@ -81,6 +124,11 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
 
       if (!existsSync(ctx.memDir)) {
         return "Memory directory not found. Create entries first."
+      }
+
+      // Configure embedding model from config
+      if (ctx.config.embedding?.model) {
+        setModelId(ctx.config.embedding.model)
       }
 
       const allVolumes = Object.keys(ctx.config.volumes)
@@ -122,10 +170,52 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
 
       // Keyword enumeration mode
       if (args.returns === "keywords") {
+        // Semantic keyword discovery (if embedding available + query provided)
+        if (args.query) {
+          const embeddingAvailable = await probeEmbeddingAvailability()
+          if (embeddingAvailable) {
+            // Auto-rebuild index if empty
+            if (!indexExists(ctx.memDir)) {
+              try {
+                await rebuildIndex(ctx.memDir, ctx.config)
+              } catch {
+                // Graceful degradation — fall through to substring matching
+              }
+            }
+
+            try {
+              const semResults = await semanticSearch(ctx.memDir, args.query, (args.limit || 50) * 2)
+              if (semResults.length > 0) {
+                // Build keyword scores from semantic results
+                const kwScores = new Map<string, number>()
+                for (const r of semResults) {
+                  kwScores.set(r.matchedKeyword, Math.max(
+                    kwScores.get(r.matchedKeyword) || 0,
+                    r.score,
+                  ))
+                }
+                const sorted = [...kwScores.entries()]
+                  .sort((a, b) => b[1] - a[1])
+                  .slice(0, args.limit || 50)
+                return sorted.map(([kw, score]) => `${kw} (${(score * 100).toFixed(0)}%)`).join("\n")
+              }
+            } catch {
+              // Fall through to substring matching
+            }
+          }
+        }
+
+        // Fallback: substring keyword enumeration
         const kwCounts = new Map<string, number>()
         let filtered = allEntries
         if (queryTags.length || queryTagsAny.length || queryTagsNot.length) {
           filtered = filtered.filter(({ entry }) => matchTags(entry, queryTags, queryTagsAny, queryTagsNot))
+        }
+        if (args.query) {
+          const queryLower = args.query.toLowerCase()
+          filtered = filtered.filter(({ entry }) =>
+            (entry.keywords || []).some(k => k.toLowerCase().includes(queryLower))
+          )
         }
         for (const { entry } of filtered) {
           for (const kw of (entry.keywords || [])) {
@@ -147,13 +237,65 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
       }
       else if (args.query) {
         const terms = args.query.split(/\s+/).filter(Boolean)
-        results = allEntries
+
+        // Fzf signal (text matching)
+        const fzfResults = allEntries
           .filter(({ entry }) => matchTags(entry, queryTags, queryTagsAny, queryTagsNot))
           .map(({ entry, volume }) => ({
             entry,
             volume,
-            score: textMatch(entry, terms),
+            score: fzfSignal(entry, terms),
           }))
+
+        // Semantic signal (optional)
+        const embeddingAvailable = await probeEmbeddingAvailability()
+        const semanticScores = new Map<string, number>()
+
+        if (embeddingAvailable) {
+          // Auto-rebuild index if empty
+          if (!indexExists(ctx.memDir)) {
+            try {
+              await rebuildIndex(ctx.memDir, ctx.config)
+            } catch {
+              // Graceful degradation — fzf only
+            }
+          }
+
+          try {
+            const query = terms.join(" ").slice(0, 50)
+            const semResults = await semanticSearch(ctx.memDir, query, allEntries.length * 2)
+            for (const r of semResults) {
+              // Normalize semantic score to [0, 10] range
+              const normalized = r.score * 10
+              semanticScores.set(r.id, normalized)
+            }
+          } catch {
+            // Graceful degradation — fzf only
+          }
+        }
+
+        // Merge scores: fzf is primary (weight 1.0), semantic is secondary (weight 0.5)
+        const entryMap = new Map<string, { entry: MemoryEntry; volume: string; fzfScore: number }>()
+        for (const r of fzfResults) {
+          entryMap.set(r.entry.id, { entry: r.entry, volume: r.volume, fzfScore: r.score })
+        }
+
+        for (const [id, semScore] of semanticScores) {
+          if (entryMap.has(id)) {
+            // Entry already has fzf score — merge
+            const existing = entryMap.get(id)!
+            existing.fzfScore += semScore * 0.5
+          } else {
+            // Entry only has semantic score — look up from allEntries
+            const found = allEntries.find(({ entry }) => entry.id === id)
+            if (found) {
+              entryMap.set(id, { entry: found.entry, volume: found.volume, fzfScore: semScore * 0.5 })
+            }
+          }
+        }
+
+        results = [...entryMap.values()]
+          .map(({ entry, volume, fzfScore }) => ({ entry, volume, score: fzfScore }))
           .filter(r => r.score > 0)
       }
       else {

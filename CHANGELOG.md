@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-23
+
+### Added
+
+- **Semantic search via local embeddings.** Telescope search now combines fzf text matching with vector similarity for concept-level discovery. Searching "user login" finds entries about "authentication"; "container orchestration" matches "Kubernetes" — no exact keyword overlap required.
+- `src/embedding.ts` — standalone embedding module using `@huggingface/transformers` with `all-MiniLM-L6-v2` (384-dim, ~22MB, English-optimized). Lazy-loaded, graceful degradation when unavailable.
+- Keyword vector index: `keywords-index.jsonl` stores per-keyword embeddings. Auto-maintained on `create`/`revise`/`forget`. Auto-rebuilt on first search if empty.
+- Hybrid scoring: `fzf_signal × 1.0 + semantic_score × 0.5`. Enhanced fzf weights: ID match +10, tag +6, keyword +5, content +3.
+- `EmbeddingConfig` type: optional `embedding:` section in `stellario.yaml` for model selection and enable/disable. Env override: `STELLARIO_EMBEDDING=off|on`.
+- `@huggingface/transformers` added as a dependency. Model downloads on first use (~22MB).
+- CLI `stellario init` now generates `.gitignore` inside memory dir (excludes `keywords-index.jsonl`).
+- E2E test environment and test plan at `test-repo/`.
+
+### Performance
+
+- Single embed: ~1.3ms. Batch embed (×12): ~0.5ms/item.
+- Search at 100 entries: ~11ms. Linear scaling confirmed up to 5000 entries.
+- Bottleneck is index I/O (JSON parse), not cosine computation.
+
 ### Fixed
 
 - Memory storage path migrated from `.stellario/` to `.opencode/memory/`, ensuring data lives in the directory with its own git repo instead of polluting the host project's git history.
@@ -60,7 +79,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Telescope tool: unified search with text matching, tag filtering (`AND`/`OR`/`NOT`), and keyword enumeration modes.
 - Documentation: README, API reference, configuration guide, concepts guide.
 
-[Unreleased]: https://github.com/FadingRose/stellario/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/FadingRose/stellario/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/FadingRose/stellario/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/FadingRose/stellario/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/FadingRose/stellario/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/FadingRose/stellario/releases/tag/v0.1.0

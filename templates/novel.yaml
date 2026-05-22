@@ -79,3 +79,8 @@ agents:
 tags:
   namespaces: [work, role, chapter, file, arc, type]
   typeValues: [handoff, design, locked, layer, convention, polish, role-card, role-baseline, role-memory, foreshadow, hidden-arc]
+
+# Semantic search configuration (optional)
+# embedding:
+#   enabled: auto       # auto | true | false
+#   model: "Xenova/all-MiniLM-L6-v2"

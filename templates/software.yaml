@@ -58,3 +58,8 @@ agents:
 tags:
   namespaces: [module, feature, crate, file, type]
   typeValues: [handoff, design, adr, convention, layer, polish, bug, investigation]
+
+# Semantic search configuration (optional)
+# embedding:
+#   enabled: auto       # auto | true | false
+#   model: "Xenova/all-MiniLM-L6-v2"
