@@ -260,3 +260,54 @@ keywords: `role · identity · workflow · prompt`
 author: stellario
 
 ---
+
+## m06
+
+## Memory Conventions
+
+### When to Write
+
+- **Every session start**: Read workspace_status (auto-injected). Check handover.
+- **Every session end**: Write a handover entry. Update layer if focus changed.
+- **When you discover something**: Create an entry in the appropriate volume.
+- **When design decisions are made**: Add to meta or update existing entry via revise.
+
+### When to Read
+
+- **workspace_status**: Auto-injected, but call manually for debug/refresh.
+- **telescope_search**: Use when you need to find specific knowledge.
+- **memory_show**: Use to expand an entry or activate a workspace.
+
+### Tag Vocabulary
+
+Use these tags consistently:
+- `type:design` — architecture and design decisions
+- `type:adr` — architecture decision records
+- `type:convention` — coding or process conventions
+- `type:handoff` — session handover notes
+- `type:layer` — workspace/focus tracking
+- `type:prompt` — dynamic prompt entries (injected by plugin)
+- `type:polish` — cleanup and refinement work
+- `type:bug` — known bugs and issues
+- `type:investigation` — research and analysis
+
+### Content Style
+
+- Use markdown with `## Title` headers (first `## ` becomes the entry title)
+- Keep entries focused: one topic per entry
+- Use refs to cross-reference related entries
+- Include code examples when relevant
+
+### Refs Convention
+
+When adding refs, always include a reason:
+- `supersedes` — this entry replaces the target
+- `relates-to` — related but independent
+- `fixes` — this entry fixes an issue documented in target
+- `derived-from` — content extracted from target
+
+tags: `type:prompt`
+keywords: `conventions · tags · workflow · prompt`
+author: stellario
+
+---
