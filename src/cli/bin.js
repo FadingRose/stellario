@@ -199,6 +199,10 @@ for (const agent of agents) {
     continue
   }
 
+  const agentDef = config.agents[agent] || {}
+  const isPrimary = agentDef.role === "primary"
+  const display = agentDef.display || agent
+
   const canWriteAny = Object.entries(volumes)
     .some(([, def]) => (def.boundaries?.write || []).includes(agent))
 
@@ -210,20 +214,30 @@ for (const agent of agents) {
     })
     .map(([name]) => name)
 
+  // Build tools list based on role and permissions
   const agentTools = []
-  if (canWriteAny) {
-    agentTools.push(...memoryTools)
-  } else {
-    agentTools.push("memory_show", "memory_history")
-  }
-  agentTools.push(...searchTools, ...workspaceTools)
 
-  const display = config.agents[agent]?.display || agent
-  const toolsYaml = agentTools.map(t => `  ${t}: true`).join("\n")
+  // Primary agent gets task delegation + code editing
+  if (isPrimary) {
+    agentTools.push("task: true")
+    agentTools.push("edit: true")
+    agentTools.push("bash: true")
+  }
+
+  // Memory tools based on write permissions
+  if (canWriteAny) {
+    agentTools.push(...memoryTools.map(t => `${t}: true`))
+  } else {
+    agentTools.push("memory_show: true", "memory_history: true")
+  }
+  agentTools.push(...searchTools.map(t => `${t}: true`))
+  agentTools.push(...workspaceTools.map(t => `${t}: true`))
+
+  const toolsYaml = agentTools.join("\n")
 
   const content = `---
 description: ${display}
-mode: primary
+mode: ${isPrimary ? "primary" : "subagent"}
 tools:
 ${toolsYaml}
 ---
@@ -235,7 +249,7 @@ Volumes: ${accessibleVolumes.join(", ")}
 <!-- Write your agent prompt here -->
 `
   writeFileSync(agentPath, content)
-  console.log(`✓ Agent: ${agent}.md`)
+  console.log(`✓ Agent: ${agent}.md (${isPrimary ? "primary" : "subagent"})`)
 }
 
 // ── 7. npm install ─────────────────────────────────────────────────────────

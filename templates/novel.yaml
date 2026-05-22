@@ -62,14 +62,19 @@ volumes:
 agents:
   stellario:
     display: "Stellario"
+    role: primary
   chronicler:
     display: "Chronicler"
+    role: subagent
   worldbuilder:
     display: "Worldbuilder"
+    role: subagent
   penna:
     display: "Penna"
+    role: subagent
   vilicus:
     display: "Vilicus"
+    role: subagent
 
 tags:
   namespaces: [work, role, chapter, file, arc, type]

@@ -1,5 +1,5 @@
 # Stellario — Software Development Config
-# 6 volumes, 4 agents
+# 6 volumes, 3 agents
 
 memoryDir: ".stellario"
 
@@ -47,12 +47,13 @@ volumes:
 agents:
   stellario:
     display: "Stellario"
+    role: primary
   analyst:
     display: "Analyst"
+    role: subagent
   executor:
     display: "Executor"
-  guardian:
-    display: "Guardian"
+    role: subagent
 
 tags:
   namespaces: [module, feature, crate, file, type]

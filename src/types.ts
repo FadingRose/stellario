@@ -68,6 +68,8 @@ export interface VolumeDef {
 export interface AgentDef {
   /** Human-readable name shown in tool output. */
   display: string
+  /** Agent role: "primary" (user-facing) or "subagent" (dispatched via task). Default: "subagent". */
+  role?: "primary" | "subagent"
 }
 
 // ─── Configuration ──────────────────────────────────────────────────────────

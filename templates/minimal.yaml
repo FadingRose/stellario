@@ -28,3 +28,4 @@ volumes:
 agents:
   stellario:
     display: "Stellario"
+    role: primary
