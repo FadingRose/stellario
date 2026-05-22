@@ -1,4 +1,3 @@
-import { z } from "zod"
 import type { ToolContext, MemoryEntry, ToolDef } from "../types.js"
 import { resolveContext } from "../context.js"
 import { resolveAgent, canRead } from "../permissions.js"
@@ -78,20 +77,42 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
       "Supports tag filtering and keyword discovery. " +
       "Use returns='tags' or returns='keywords' to enumerate values.",
     args: {
-      query: z.string().optional()
-        .describe("Space-separated search terms. Omit for index/overview mode."),
-      volumes: z.array(z.string()).optional()
-        .describe("Volumes to search. Default: all readable volumes."),
-      tags: z.array(z.string()).optional()
-        .describe("AND filter: entries must have ALL these tags."),
-      tags_any: z.array(z.string()).optional()
-        .describe("OR filter: entries must have at least ONE of these tags."),
-      tags_not: z.array(z.string()).optional()
-        .describe("NOT filter: exclude entries with any of these tags."),
-      limit: z.number().optional()
-        .describe("Max results (default 20)."),
-      returns: z.enum(["entries", "tags", "keywords"]).optional()
-        .describe("What to return. 'entries' (default), 'tags' (enumerate tag values), 'keywords' (enumerate keywords)."),
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Space-separated search terms. Omit for index/overview mode.",
+        },
+        volumes: {
+          type: "array",
+          items: { type: "string" },
+          description: "Volumes to search. Default: all readable volumes.",
+        },
+        tags: {
+          type: "array",
+          items: { type: "string" },
+          description: "AND filter: entries must have ALL these tags.",
+        },
+        tags_any: {
+          type: "array",
+          items: { type: "string" },
+          description: "OR filter: entries must have at least ONE of these tags.",
+        },
+        tags_not: {
+          type: "array",
+          items: { type: "string" },
+          description: "NOT filter: exclude entries with any of these tags.",
+        },
+        limit: {
+          type: "number",
+          description: "Max results (default 20).",
+        },
+        returns: {
+          type: "string",
+          enum: ["entries", "tags", "keywords"],
+          description: "What to return. 'entries' (default), 'tags' (enumerate tag values), 'keywords' (enumerate keywords).",
+        },
+      },
     },
     async execute(args, context: ToolContext) {
       // Defensive: opencode may pass array params as JSON strings

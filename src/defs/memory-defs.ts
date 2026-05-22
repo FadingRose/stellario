@@ -1,4 +1,3 @@
-import { z } from "zod"
 import type { StellarioConfig, MemoryEntry, MemoryRef, ToolContext, ToolDef } from "../types.js"
 import { profileBehavior } from "../types.js"
 import { resolveContext, type ResolvedContext } from "../context.js"
@@ -62,10 +61,14 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       "Volume determines storage location; permissions are auto-checked. " +
       "Author is auto-filled from agent identity.",
     args: {
-      volume: z.string().describe("Target volume name (as defined in stellario.yaml)."),
-      content: z.string().describe("Entry text content."),
-      tags: z.array(z.string()).optional().describe("Tags in namespace:name format."),
-      keywords: z.array(z.string()).optional().describe("2-5 free-form keywords for discovery."),
+      type: "object",
+      properties: {
+        volume: { type: "string", description: "Target volume name (as defined in stellario.yaml)." },
+        content: { type: "string", description: "Entry text content." },
+        tags: { type: "array", items: { type: "string" }, description: "Tags in namespace:name format." },
+        keywords: { type: "array", items: { type: "string" }, description: "2-5 free-form keywords for discovery." },
+      },
+      required: ["volume", "content"],
     },
     async execute(args, context: ToolContext) {
       if (!args.content?.trim()) return "\u274c content is required."
@@ -139,7 +142,11 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       "Read a memory entry by ID. Shows full content with line numbers, tags, and refs. " +
       "For entries in the workspace volume, automatically activates as current context.",
     args: {
-      id: z.string().describe("Entry ID to read."),
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Entry ID to read." },
+      },
+      required: ["id"],
     },
     async execute(args, context: ToolContext) {
       if (!args.id) return "\u274c show requires 'id'."
@@ -195,17 +202,41 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       "Edit a memory entry: modify content lines and/or manage refs. " +
       "Content edits use line ranges. Changes are committed to git automatically.",
     args: {
-      id: z.string().describe("Entry ID to edit."),
-      edits: z.array(z.object({
-        range: z.string().describe("Line range: '43' or '43-54'."),
-        content: z.string().describe("Replacement text."),
-      })).optional().describe("Content edits, applied back-to-front."),
-      refs_add: z.array(z.object({
-        target: z.string().describe("Target entry ID."),
-        reason: z.string().describe("Why this entry references the target."),
-      })).optional().describe("Refs to add."),
-      refs_remove: z.array(z.string()).optional().describe("Entry IDs to remove from refs."),
-      message: z.string().describe("Why this edit was made."),
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Entry ID to edit." },
+        edits: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              range: { type: "string", description: "Line range: '43' or '43-54'." },
+              content: { type: "string", description: "Replacement text." },
+            },
+            required: ["range", "content"],
+          },
+          description: "Content edits, applied back-to-front.",
+        },
+        refs_add: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              target: { type: "string", description: "Target entry ID." },
+              reason: { type: "string", description: "Why this entry references the target." },
+            },
+            required: ["target", "reason"],
+          },
+          description: "Refs to add.",
+        },
+        refs_remove: {
+          type: "array",
+          items: { type: "string" },
+          description: "Entry IDs to remove from refs.",
+        },
+        message: { type: "string", description: "Why this edit was made." },
+      },
+      required: ["id", "message"],
     },
     async execute(args, context: ToolContext) {
       if (!args.id) return "\u274c revise requires 'id'."
@@ -327,7 +358,11 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       "Archive a memory entry. Moves to 'archived' (frozen, read-only). " +
       "Only the entry's author can archive it. Append volumes cannot be archived.",
     args: {
-      id: z.string().describe("Entry ID to archive."),
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Entry ID to archive." },
+      },
+      required: ["id"],
     },
     async execute(args, context: ToolContext) {
       if (!args.id) return "\u274c forget requires 'id'."
@@ -382,8 +417,12 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
   const history: ToolDef = {
     description: "View the git revision history of a memory entry.",
     args: {
-      id: z.string().describe("Entry ID."),
-      limit: z.number().optional().describe("Max revisions (default 10)."),
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Entry ID." },
+        limit: { type: "number", description: "Max revisions (default 10)." },
+      },
+      required: ["id"],
     },
     async execute(args, context: ToolContext) {
       if (!args.id) return "\u274c history requires 'id'."

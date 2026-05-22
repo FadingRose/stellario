@@ -1,6 +1,6 @@
 {
   "name": "stellario",
-  "version": "0.4.0",
+  "version": "0.4.0-dev.1",
   "description": "Agent memory infrastructure — Volume-based knowledge management for opencode",
   "type": "module",
   "main": "src/index.ts",
@@ -20,8 +20,7 @@
     "./types": "./src/types.ts"
   },
   "dependencies": {
-    "yaml": "^2.4.0",
-    "zod": "^3.23.0"
+    "yaml": "^2.4.0"
   },
   "optionalDependencies": {
     "@huggingface/transformers": "^3.0.0"
