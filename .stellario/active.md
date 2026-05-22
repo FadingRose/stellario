@@ -42,3 +42,61 @@ tags: ``
 author: stellario
 
 ---
+
+## a02
+
+## Module API Quick Reference
+
+### stellario/config
+- loadConfig(projectRoot): StellarioConfig
+- validateConfig(raw, path): StellarioConfig (internal)
+- getWorkspaceVolume(config): string | null
+- getTrackedVolumes(config): string[]
+- getVolumeIdPrefix(config, volume): string
+- getMemoryDir(config, projectRoot): string
+
+### stellario/store
+- readJsonl(memDir, volume): MemoryEntry[]
+- writeEntries(memDir, volume, entries, config): void
+- generateNextId(memDir, volume, config): string
+- findEntry(memDir, id, config): { entry, volume } | null
+- getActiveWorkspace(memDir, workspaceVolume): string | null
+- setActiveWorkspace(memDir, workspaceVolume, id): void
+- readVolumeIndex(memDir): VolumeIndexEntry[]
+- extractTitle(content): string
+- truncate(s, maxChars): string
+- today(): string
+- dedupeTags(tags): string[]
+
+### stellario/permissions
+- resolveAgent(agentStr, config): string | null
+- canRead(agent, volume, config): boolean
+- canWrite(agent, volume, config): boolean
+- canCreate(volume, config): boolean
+- canRevise(volume, config): boolean
+- canForget(volume, config): boolean
+- isAuthor(agent, entryAuthor): boolean
+- readableVolumes(agent, config): string[]
+- writableVolumes(agent, config): string[]
+- canCrossStory(agent, config): boolean
+
+### stellario/git
+- gitCommit(memDir, volume, message, config): string | null
+- isGitRepo(memDir): boolean
+- initGitRepo(memDir): boolean
+
+### stellario/context
+- resolveContext(ctx): ResolvedContext
+- isRustProject(projectRoot): boolean
+- hasOpencodeConfig(projectRoot): boolean
+- getRustCrates(projectRoot): string[]
+
+### stellario (index)
+- getMemoryToolDefs(): Record of create, show, revise, forget, history
+- getWorkspaceToolDefs(): Record of status
+- getTelescopeToolDefs(): Record of search
+
+tags: ``
+author: stellario
+
+---
