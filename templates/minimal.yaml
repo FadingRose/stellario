@@ -1,0 +1,30 @@
+# Stellario — Minimal Config
+# For simple projects with a single agent
+
+memoryDir: ".stellario"
+
+volumes:
+  active:
+    profile: mutable
+    boundaries:
+      write: [lead]
+      read: [all]
+  handover:
+    profile: append
+    boundaries:
+      write: [lead]
+      read: [lead]
+  drafting:
+    profile: scratch
+    boundaries:
+      write: [lead]
+      read: [lead]
+  workspace:
+    profile: workspace
+    boundaries:
+      write: [lead]
+      read: [lead]
+
+agents:
+  lead:
+    display: "Lead"

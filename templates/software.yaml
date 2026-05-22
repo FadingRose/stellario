@@ -1,0 +1,59 @@
+# Stellario — Software Development Config
+# 6 volumes, 4 agent archetypes
+
+memoryDir: ".stellario"
+
+volumes:
+  meta:
+    profile: mutable
+    boundaries:
+      write: [lead]
+      read: [lead]
+    authority: curated
+    idPrefix: "m"
+  active:
+    profile: mutable
+    boundaries:
+      write: [lead]
+      read: [all]
+    authority: curated
+    idPrefix: "a"
+  handover:
+    profile: append
+    boundaries:
+      write: [lead]
+      read: [lead, analyst]
+    authority: curated
+    idPrefix: "h"
+  layer:
+    profile: workspace
+    boundaries:
+      write: [lead, analyst]
+      read: [lead, analyst]
+    authority: curated
+    idPrefix: "l"
+  drafting:
+    profile: scratch
+    boundaries:
+      write: [lead, executor]
+      read: [lead, analyst, executor]
+    authority: curated
+    idPrefix: "d"
+  archived:
+    profile: frozen
+    boundaries:
+      read: [all]
+
+agents:
+  lead:
+    display: "Lead"
+  analyst:
+    display: "Analyst"
+  executor:
+    display: "Executor"
+  guardian:
+    display: "Guardian"
+
+tags:
+  namespaces: [module, feature, crate, file, type]
+  typeValues: [handoff, design, adr, convention, layer, polish, bug, investigation]

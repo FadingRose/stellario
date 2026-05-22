@@ -1,0 +1,76 @@
+# Stellario — Novel Writing Config (Lilac-style)
+# 7 volumes, 5 agents
+
+memoryDir: ".writer-memory"
+
+volumes:
+  meta:
+    profile: mutable
+    boundaries:
+      write: [maestro]
+      read: [maestro]
+    authority: curated
+    idPrefix: "m"
+  active:
+    profile: mutable
+    boundaries:
+      write: [maestro]
+      read: [all]
+    authority: curated
+    idPrefix: "a"
+  handover:
+    profile: append
+    boundaries:
+      write: [maestro]
+      read: [maestro, chronicler]
+    authority: curated
+    idPrefix: "h"
+  layer:
+    profile: workspace
+    boundaries:
+      write: [maestro, chronicler]
+      read: [maestro, chronicler]
+    authority: curated
+    idPrefix: "l"
+  drafting:
+    profile: scratch
+    boundaries:
+      write: [maestro, penna]
+      read: [maestro, chronicler, penna]
+    authority: curated
+    idPrefix: "d"
+  lore:
+    profile: mutable
+    boundaries:
+      write: [stellario]
+      read: [maestro, chronicler, stellario, vilicus]
+    authority: synthesized
+    idPrefix: "s"
+    requiredTagPrefix: "lore:"
+  animus:
+    profile: mutable
+    boundaries:
+      write: [vilicus]
+      read: [maestro, vilicus, stellario]
+    authority: curated
+    idPrefix: "n"
+  archived:
+    profile: frozen
+    boundaries:
+      read: [all]
+
+agents:
+  maestro:
+    display: "Maestro"
+  chronicler:
+    display: "Chronicler"
+  stellario:
+    display: "Stellario"
+  penna:
+    display: "Penna"
+  vilicus:
+    display: "Vilicus"
+
+tags:
+  namespaces: [work, role, chapter, file, arc, type]
+  typeValues: [handoff, design, locked, layer, convention, polish, role-card, role-baseline, role-memory, foreshadow, hidden-arc]
