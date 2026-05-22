@@ -1,5 +1,5 @@
-# Stellario — Novel Writing Config (Lilac-style)
-# 7 volumes, 5 agents
+# Stellario — Novel Writing Config
+# 8 volumes, 5 agents
 
 memoryDir: ".writer-memory"
 
@@ -7,43 +7,43 @@ volumes:
   meta:
     profile: mutable
     boundaries:
-      write: [maestro]
-      read: [maestro]
+      write: [stellario]
+      read: [stellario]
     authority: curated
     idPrefix: "m"
   active:
     profile: mutable
     boundaries:
-      write: [maestro]
+      write: [stellario]
       read: [all]
     authority: curated
     idPrefix: "a"
   handover:
     profile: append
     boundaries:
-      write: [maestro]
-      read: [maestro, chronicler]
+      write: [stellario]
+      read: [stellario, chronicler]
     authority: curated
     idPrefix: "h"
   layer:
     profile: workspace
     boundaries:
-      write: [maestro, chronicler]
-      read: [maestro, chronicler]
+      write: [stellario, chronicler]
+      read: [stellario, chronicler]
     authority: curated
     idPrefix: "l"
   drafting:
     profile: scratch
     boundaries:
-      write: [maestro, penna]
-      read: [maestro, chronicler, penna]
+      write: [stellario, penna]
+      read: [stellario, chronicler, penna]
     authority: curated
     idPrefix: "d"
   lore:
     profile: mutable
     boundaries:
-      write: [stellario]
-      read: [maestro, chronicler, stellario, vilicus]
+      write: [worldbuilder]
+      read: [stellario, chronicler, worldbuilder, vilicus]
     authority: synthesized
     idPrefix: "s"
     requiredTagPrefix: "lore:"
@@ -51,7 +51,7 @@ volumes:
     profile: mutable
     boundaries:
       write: [vilicus]
-      read: [maestro, vilicus, stellario]
+      read: [stellario, vilicus, worldbuilder]
     authority: curated
     idPrefix: "n"
   archived:
@@ -60,12 +60,12 @@ volumes:
       read: [all]
 
 agents:
-  maestro:
-    display: "Maestro"
-  chronicler:
-    display: "Chronicler"
   stellario:
     display: "Stellario"
+  chronicler:
+    display: "Chronicler"
+  worldbuilder:
+    display: "Worldbuilder"
   penna:
     display: "Penna"
   vilicus:

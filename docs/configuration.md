@@ -16,7 +16,7 @@ volumes:
   active:
     profile: mutable
     boundaries:
-      write: [lead]
+      write: [stellario]
       read: [all]
   archived:
     profile: frozen
@@ -24,8 +24,8 @@ volumes:
       read: [all]
 
 agents:
-  lead:
-    display: "Lead"
+  stellario:
+    display: "Stellario"
 ```
 
 This gives you a single agent with a writable `active` volume and a read-only `archived` volume.
@@ -137,7 +137,7 @@ Controls which agents can access the volume.
 
 ```yaml
 boundaries:
-  write: [maestro, chronicler]  # only these agents can write
+  write: [stellario, chronicler]  # only these agents can write
   read: [all]                    # all agents can read
 ```
 
@@ -183,8 +183,8 @@ volumes:
     profile: append
     idPrefix: "h"     # IDs: h01, h02, h03, ...
     boundaries:
-      write: [lead]
-      read: [lead]
+      write: [stellario]
+      read: [stellario]
 ```
 
 If omitted, the default is `volumeName.charAt(0)`. Make sure prefixes are unique across volumes to avoid ID collisions (Stellario does not enforce this — it's your responsibility).
@@ -237,13 +237,13 @@ Human-readable name shown in tool output, error messages, and formatted displays
 
 ```yaml
 agents:
-  maestro:
-    display: "Maestro"    # shown as "Agent Maestro cannot write to..."
+  stellario:
+    display: "Stellario"    # shown as "Agent Stellario cannot write to..."
 ```
 
 **Special semantics:**
 
-The **first agent** listed in the config has a special privilege: `canCrossStory()` returns `true` for it. This is used in multi-story projects where one "lead" agent needs to search across all stories.
+The **first agent** listed in the config has a special privilege: `canCrossStory()` returns `true` for it. This is used in multi-story projects where the primary agent needs to search across all stories.
 
 ### `tags`
 
@@ -261,7 +261,7 @@ tags:
   namespaces: [work, role, chapter, file, arc, type]
 ```
 
-Valid tags: `work:origins`, `role:maestro`, `chapter:06`, `type:design`
+Valid tags: `work:origins`, `role:stellario`, `chapter:06`, `type:design`
 
 #### `typeValues`
 
@@ -285,17 +285,17 @@ Single agent, 4 volumes. For simple projects.
 ```yaml
 memoryDir: ".stellario"
 volumes:
-  active:    { profile: mutable,  boundaries: { write: [lead], read: [all] } }
-  handover:  { profile: append,  boundaries: { write: [lead], read: [lead] } }
-  drafting:  { profile: scratch, boundaries: { write: [lead], read: [lead] } }
-  workspace: { profile: workspace, boundaries: { write: [lead], read: [lead] } }
+  active:    { profile: mutable,  boundaries: { write: [stellario], read: [all] } }
+  handover:  { profile: append,  boundaries: { write: [stellario], read: [stellario] } }
+  drafting:  { profile: scratch, boundaries: { write: [stellario], read: [stellario] } }
+  workspace: { profile: workspace, boundaries: { write: [stellario], read: [stellario] } }
 agents:
-  lead: { display: "Lead" }
+  stellario: { display: "Stellario" }
 ```
 
 ### novel.yaml
 
-5 agents, 8 volumes. Multi-agent fiction writing (Lilac-compatible).
+5 agents, 8 volumes. Multi-agent fiction writing.
 
 ```yaml
 memoryDir: ".writer-memory"
@@ -309,14 +309,98 @@ volumes:
   animus:    { profile: mutable,   authority: curated,     idPrefix: n }
   archived:  { profile: frozen }
 agents:
-  maestro:    { display: "Maestro" }
-  chronicler: { display: "Chronicler" }
-  stellario:  { display: "Stellario" }
-  penna:      { display: "Penna" }
-  vilicus:    { display: "Vilicus" }
+  stellario:    { display: "Stellario" }
+  chronicler:   { display: "Chronicler" }
+  worldbuilder: { display: "Worldbuilder" }
+  penna:        { display: "Penna" }
+  vilicus:      { display: "Vilicus" }
 tags:
   namespaces: [work, role, chapter, file, arc, type]
   typeValues: [handoff, design, locked, layer, convention, polish, role-card, foreshadow]
+```
+
+Permission matrix:
+
+```
+Agent        | meta | active | handover | layer | drafting | lore | animus
+────────────────────────────────────────────────────────────────────────────
+Stellario    |  W   |  W     |  W       |  W    |  W       |  -   |  -
+Chronicler   |  -   |  -     |  -       |  W    |  -       |  -   |  -
+Worldbuilder |  -   |  -     |  -       |  -    |  -       |  W   |  -
+Penna        |  -   |  -     |  -       |  -    |  W       |  -   |  -
+Vilicus      |  -   |  -     |  -       |  -    |  -       |  -   |  W
+```
+
+### software.yaml
+
+4 agents, 6 volumes. Software development.
+
+```yaml
+memoryDir: ".stellario"
+volumes:
+  meta:      { profile: mutable,   idPrefix: m }
+  active:    { profile: mutable,   idPrefix: a }
+  handover:  { profile: append,    idPrefix: h }
+  layer:     { profile: workspace, idPrefix: l }
+  drafting:  { profile: scratch,   idPrefix: d }
+  archived:  { profile: frozen }
+agents:
+  stellario: { display: "Stellario" }
+  analyst:   { display: "Analyst" }
+  executor:  { display: "Executor" }
+  guardian:  { display: "Guardian" }
+tags:
+  namespaces: [module, feature, crate, file, type]
+  typeValues: [handoff, design, adr, convention, layer, polish, bug, investigation]
+```
+
+Permission matrix:
+
+```
+Agent      | meta | active | handover | layer | drafting | archived
+───────────────────────────────────────────────────────────────────
+Stellario  |  W   |  W     |  W       |  W    |  W       |  R
+Analyst    |  -   |  -     |  -       |  W    |  -       |  R
+Executor   |  -   |  -     |  -       |  -    |  W       |  R
+Guardian   |  -   |  -     |  -       |  -    |  -       |  R
+```
+
+### novel.yaml
+
+5 agents, 8 volumes. Multi-agent fiction writing.
+
+```yaml
+memoryDir: ".writer-memory"
+volumes:
+  meta:      { profile: mutable,   authority: curated,     idPrefix: m }
+  active:    { profile: mutable,   authority: curated,     idPrefix: a }
+  handover:  { profile: append,    authority: curated,     idPrefix: h }
+  layer:     { profile: workspace, authority: curated,     idPrefix: l }
+  drafting:  { profile: scratch,   authority: curated,     idPrefix: d }
+  lore:      { profile: mutable,   authority: synthesized, idPrefix: s, requiredTagPrefix: "lore:" }
+  animus:    { profile: mutable,   authority: curated,     idPrefix: n }
+  archived:  { profile: frozen }
+agents:
+  stellario:    { display: "Stellario" }
+  chronicler:   { display: "Chronicler" }
+  worldbuilder: { display: "Worldbuilder" }
+  penna:        { display: "Penna" }
+  vilicus:      { display: "Vilicus" }
+tags:
+  namespaces: [work, role, chapter, file, arc, type]
+  typeValues: [handoff, design, locked, layer, convention, polish, role-card, foreshadow]
+```
+
+Permission matrix:
+
+```
+Agent        | meta | active | handover | layer | drafting | lore | animus
+────────────────────────────────────────────────────────────────────────────
+Stellario    |  W   |  W     |  W       |  W    |  W       |  -   |  -
+Chronicler   |  -   |  -     |  -       |  W    |  -       |  -   |  -
+Worldbuilder |  -   |  -     |  -       |  -    |  -       |  W   |  -
+Penna        |  -   |  -     |  -       |  -    |  W       |  -   |  -
+Vilicus      |  -   |  -     |  -       |  -    |  -       |  -   |  W
 ```
 
 Permission matrix:
@@ -345,13 +429,24 @@ volumes:
   drafting:  { profile: scratch,   idPrefix: d }
   archived:  { profile: frozen }
 agents:
-  lead:     { display: "Lead" }
-  analyst:  { display: "Analyst" }
-  executor: { display: "Executor" }
-  guardian: { display: "Guardian" }
+  stellario: { display: "Stellario" }
+  analyst:   { display: "Analyst" }
+  executor:  { display: "Executor" }
+  guardian:  { display: "Guardian" }
 tags:
   namespaces: [module, feature, crate, file, type]
   typeValues: [handoff, design, adr, convention, layer, polish, bug, investigation]
+```
+
+Permission matrix:
+
+```
+Agent      | meta | active | handover | layer | drafting | archived
+───────────────────────────────────────────────────────────────────
+Stellario  |  W   |  W     |  W       |  W    |  W       |  R
+Analyst    |  -   |  -     |  -       |  W    |  -       |  R
+Executor   |  -   |  -     |  -       |  -    |  W       |  R
+Guardian   |  -   |  -     |  -       |  -    |  -       |  R
 ```
 
 Permission matrix:
@@ -386,7 +481,7 @@ const config = loadConfig("/path/to/project")
 
 // Access directly
 console.log(config.volumes.active.profile)  // "mutable"
-console.log(config.agents.lead.display)      // "Lead"
+console.log(config.agents.stellario.display) // "Stellario"
 ```
 
 The config loader searches upward from the given directory until it finds `stellario.yaml`, then caches the result.

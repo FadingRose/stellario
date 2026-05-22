@@ -324,8 +324,8 @@ truncate("A very long string...", 10)  // "A very lo…"
 Deduplicate tags (case-insensitive).
 
 ```typescript
-dedupeTags(["type:design", "type:Design", "role:lead"])
-// ["type:design", "role:lead"]
+dedupeTags(["type:design", "type:Design", "role:stellario"])
+// ["type:design", "role:stellario"]
 ```
 
 #### `today(): string`
@@ -343,7 +343,7 @@ Config-driven permission engine.
 Normalize an agent string to a known agent name. Case-insensitive with partial matching.
 
 ```typescript
-resolveAgent("Maestro", config)    // "maestro"
+resolveAgent("Stellario", config)  // "stellario"
 resolveAgent("unknown-agent", config)  // null
 ```
 
@@ -361,7 +361,7 @@ canRead("chronicler", "active", config) // true (read: [all])
 Check if an agent can write to a volume. Respects profile restrictions (e.g., frozen rejects all).
 
 ```typescript
-canWrite("lead", "active", config)    // true
+canWrite("stellario", "active", config)    // true
 canWrite("executor", "active", config) // false
 ```
 
@@ -388,7 +388,7 @@ canForget("handover", config) // false (append)
 Check if an agent is the author of an entry. Case-insensitive.
 
 ```typescript
-isAuthor("maestro", "Maestro")  // true
+isAuthor("stellario", "Stellario") // true
 ```
 
 #### `readableVolumes(agent: string, config: StellarioConfig): string[]`
@@ -405,7 +405,7 @@ readableVolumes("executor", config)
 Get all volumes an agent can write to (excluding frozen).
 
 ```typescript
-writableVolumes("lead", config)
+writableVolumes("stellario", config)
 // ["meta", "active", "handover", "layer", "drafting"]
 ```
 
@@ -414,7 +414,7 @@ writableVolumes("lead", config)
 Check if an agent can search across all stories. Only the first listed agent has this privilege.
 
 ```typescript
-canCrossStory("maestro", config)     // true (first agent)
+canCrossStory("stellario", config)  // true (first agent)
 canCrossStory("chronicler", config)  // false
 ```
 
@@ -456,8 +456,8 @@ Resolve the full runtime context from a `ToolContext`. Loads config and computes
 ```typescript
 import { resolveContext } from "stellario/context"
 
-const resolved = resolveContext({ directory: "/home/user/project", agent: "lead" })
-// { config: StellarioConfig, projectRoot: "/home/user/project", memDir: "/home/user/project/.stellario", agent: "lead" }
+const resolved = resolveContext({ directory: "/home/user/project", agent: "stellario" })
+// { config: StellarioConfig, projectRoot: "/home/user/project", memDir: "/home/user/project/.stellario", agent: "stellario" }
 ```
 
 #### `isRustProject(projectRoot: string): boolean`

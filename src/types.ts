@@ -129,7 +129,7 @@ export interface VolumeIndexEntry {
 export interface ToolContext {
   /** Absolute path to the project root directory. */
   directory: string
-  /** Agent identity string (e.g., "maestro", "meta"). */
+  /** Agent identity string (e.g., "stellario", "analyst"). */
   agent: string
 }
 

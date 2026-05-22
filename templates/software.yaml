@@ -1,5 +1,5 @@
 # Stellario — Software Development Config
-# 6 volumes, 4 agent archetypes
+# 6 volumes, 4 agents
 
 memoryDir: ".stellario"
 
@@ -7,36 +7,36 @@ volumes:
   meta:
     profile: mutable
     boundaries:
-      write: [lead]
-      read: [lead]
+      write: [stellario]
+      read: [stellario]
     authority: curated
     idPrefix: "m"
   active:
     profile: mutable
     boundaries:
-      write: [lead]
+      write: [stellario]
       read: [all]
     authority: curated
     idPrefix: "a"
   handover:
     profile: append
     boundaries:
-      write: [lead]
-      read: [lead, analyst]
+      write: [stellario]
+      read: [stellario, analyst]
     authority: curated
     idPrefix: "h"
   layer:
     profile: workspace
     boundaries:
-      write: [lead, analyst]
-      read: [lead, analyst]
+      write: [stellario, analyst]
+      read: [stellario, analyst]
     authority: curated
     idPrefix: "l"
   drafting:
     profile: scratch
     boundaries:
-      write: [lead, executor]
-      read: [lead, analyst, executor]
+      write: [stellario, executor]
+      read: [stellario, analyst, executor]
     authority: curated
     idPrefix: "d"
   archived:
@@ -45,8 +45,8 @@ volumes:
       read: [all]
 
 agents:
-  lead:
-    display: "Lead"
+  stellario:
+    display: "Stellario"
   analyst:
     display: "Analyst"
   executor:

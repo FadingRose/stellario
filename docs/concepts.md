@@ -154,7 +154,7 @@ Each volume defines **boundaries** — which agents can read and write:
 
 ```yaml
 boundaries:
-  write: [maestro, chronicler]
+  write: [stellario, chronicler]
   read: [all]
 ```
 
@@ -186,7 +186,7 @@ forget      canForget?       —                   isAuthor?
 
 ### Why Author-Only for Revise/Forget?
 
-Only the agent who created an entry can modify or archive it. This prevents accidental clobbering across agents. The lead agent can always read everything (via `read: [all]`) but cannot silently edit another agent's entries.
+Only the agent who created an entry can modify or archive it. This prevents accidental clobbering across agents. The primary agent can always read everything (via `read: [all]`) but cannot silently edit another agent's entries.
 
 ## Entries
 
@@ -199,7 +199,7 @@ An entry is the fundamental unit of memory. Each entry is a JSONL record:
   "content": "## Architecture\nWe chose a modular design...",
   "tags": ["type:design", "module:core"],
   "keywords": ["architecture", "modular"],
-  "author": "lead",
+  "author": "stellario",
   "created": "2026-05-23",
   "updated": "2026-05-23",
   "refs": []
@@ -216,7 +216,7 @@ Structured categorization using `namespace:value` format:
 
 - `type:design`, `type:convention`, `type:handoff`
 - `work:origins`, `work:lore`
-- `role:maestro`, `role:penna`
+- `role:stellario`, `role:penna`
 - `chapter:06`, `file:src/store.ts`
 
 Tags enable precise filtering in telescope search.
@@ -256,8 +256,8 @@ The prefix character(s) come from the volume config (default: first character of
 Each volume stores entries as JSONL (one JSON object per line):
 
 ```
-{"id":"a01","volume":"active","content":"## First Entry\n...","tags":[],"keywords":[],"author":"lead","created":"2026-05-23","updated":"2026-05-23"}
-{"id":"a02","volume":"active","content":"## Second Entry\n...","tags":[],"keywords":[],"author":"lead","created":"2026-05-23","updated":"2026-05-23"}
+{"id":"a01","volume":"active","content":"## First Entry\n...","tags":[],"keywords":[],"author":"stellario","created":"2026-05-23","updated":"2026-05-23"}
+{"id":"a02","volume":"active","content":"## Second Entry\n...","tags":[],"keywords":[],"author":"stellario","created":"2026-05-23","updated":"2026-05-23"}
 ```
 
 JSONL is chosen over JSON arrays for:
@@ -294,7 +294,7 @@ Tracked volumes also generate a `.md` file:
 
 tags: `type:design · module:core`
 keywords: architecture, modular
-author: lead
+author: stellario
 
 ---
 ```

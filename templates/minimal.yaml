@@ -7,24 +7,24 @@ volumes:
   active:
     profile: mutable
     boundaries:
-      write: [lead]
+      write: [stellario]
       read: [all]
   handover:
     profile: append
     boundaries:
-      write: [lead]
-      read: [lead]
+      write: [stellario]
+      read: [stellario]
   drafting:
     profile: scratch
     boundaries:
-      write: [lead]
-      read: [lead]
+      write: [stellario]
+      read: [stellario]
   workspace:
     profile: workspace
     boundaries:
-      write: [lead]
-      read: [lead]
+      write: [stellario]
+      read: [stellario]
 
 agents:
-  lead:
-    display: "Lead"
+  stellario:
+    display: "Stellario"

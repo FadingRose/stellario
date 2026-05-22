@@ -8,7 +8,7 @@ Stellario gives AI agents structured, permissioned, version-controlled memory â€
 
 When multiple AI agents collaborate on a project (writing a novel, building software, maintaining a knowledge base), they need shared memory with different access patterns:
 
-- A **lead agent** needs to create and edit design decisions
+- A **primary agent** needs to create and edit design decisions
 - A **specialist agent** should only write to its domain
 - A **scratchpad** for drafts that don't need version control
 - A **frozen archive** for historical records
@@ -68,21 +68,21 @@ volumes:
   active:
     profile: mutable
     boundaries:
-      write: [lead]
+      write: [stellario]
       read: [all]
   drafting:
     profile: scratch
     boundaries:
-      write: [lead]
-      read: [lead]
+      write: [stellario]
+      read: [stellario]
   archived:
     profile: frozen
     boundaries:
       read: [all]
 
 agents:
-  lead:
-    display: "Lead"
+  stellario:
+    display: "Stellario"
 ```
 
 See `templates/` for ready-made configs:
@@ -152,7 +152,7 @@ Each volume defines a `boundaries` object:
 
 ```yaml
 boundaries:
-  write: [maestro, chronicler]
+  write: [stellario, chronicler]
   read: [all]
 ```
 
@@ -171,7 +171,7 @@ A memory entry is a JSONL record:
   "content": "## Design Decision\nWe chose SQLite for local-first storage.",
   "tags": ["type:design", "module:storage"],
   "keywords": ["sqlite", "local-first"],
-  "author": "lead",
+  "author": "stellario",
   "created": "2026-05-23",
   "updated": "2026-05-23",
   "refs": [{ "target": "m01", "reason": "supersedes previous design" }]
