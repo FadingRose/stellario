@@ -10,6 +10,7 @@ import {
 } from "../store.js"
 import { gitCommit } from "../git.js"
 import { getWorkspaceVolume } from "../config.js"
+import { updateKeywordIndex, removeKeywordIndex } from "../embedding.js"
 
 // =============================================================================
 // Shared Helpers
@@ -110,6 +111,11 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       writeEntries(ctx.memDir, args.volume, entries, ctx.config)
 
       const commitHash = gitCommit(ctx.memDir, args.volume, `create: ${truncate(args.content, 50)}\n\nEntry: ${id}\nVolume: ${args.volume}\nAuthor: ${agent}`, ctx.config)
+
+      // Update keyword index (async, graceful degradation)
+      if (keywords.length > 0) {
+        await updateKeywordIndex(ctx.memDir, id, keywords).catch(() => {})
+      }
 
       const lines = [
         `Created [${id}] \u2192 ${args.volume}`,
@@ -304,6 +310,9 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
 
       const commitHash = gitCommit(ctx.memDir, volume, `revise: ${args.message}\n\nEntry: ${args.id}\nChanges: ${changes.join(", ")}`, ctx.config)
 
+      // Update keyword index (async, graceful degradation)
+      await updateKeywordIndex(ctx.memDir, args.id, updatedEntry.keywords || []).catch(() => {})
+
       return [
         `Revised [${args.id}] \u2192 ${volume}`,
         `Changes: ${changes.join(", ")}`,
@@ -358,6 +367,9 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       writeEntries(ctx.memDir, "archived", archivedEntries, ctx.config)
 
       const commitHash = gitCommit(ctx.memDir, volume, `archive: ${truncate(entry.content, 50)}\n\nEntry: ${args.id}\nFrom: ${volume} \u2192 archived`, ctx.config)
+
+      // Remove keyword index
+      removeKeywordIndex(ctx.memDir, args.id)
 
       return [
         `Archived [${args.id}] ${volume} \u2192 archived`,
