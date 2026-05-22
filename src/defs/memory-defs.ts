@@ -1,4 +1,3 @@
-import { z } from "zod"
 import type { StellarioConfig, MemoryEntry, MemoryRef, ToolContext, ToolDef } from "../types.js"
 import { profileBehavior } from "../types.js"
 import { resolveContext, type ResolvedContext } from "../context.js"
@@ -11,6 +10,9 @@ import {
 import { gitCommit } from "../git.js"
 import { getWorkspaceVolume } from "../config.js"
 import { updateKeywordIndex, removeKeywordIndex } from "../embedding.js"
+
+// zod is injected by the glue layer to avoid dual-instance conflicts
+type ZodLib = typeof import("zod")
 
 // =============================================================================
 // Shared Helpers
@@ -55,7 +57,7 @@ function formatRefs(refs: MemoryRef[]): string {
 // Tool Definitions
 // =============================================================================
 
-export function getMemoryToolDefs(): Record<string, ToolDef> {
+export function getMemoryToolDefs(z: ZodLib): Record<string, ToolDef> {
   const create: ToolDef = {
     description:
       "Create a memory entry in a specified volume. " +

@@ -1,4 +1,3 @@
-import { z } from "zod"
 import type { ToolContext, MemoryEntry, ToolDef } from "../types.js"
 import { resolveContext } from "../context.js"
 import { resolveAgent, canRead } from "../permissions.js"
@@ -7,6 +6,9 @@ import { loadConfig, getMemoryDir, getWorkspaceVolume, getTrackedVolumes } from 
 import { existsSync, readFileSync } from "fs"
 import { join } from "path"
 import { probeEmbeddingAvailability, semanticSearch } from "../embedding.js"
+
+// zod is injected by the glue layer to avoid dual-instance conflicts
+type ZodLib = typeof import("zod")
 
 // =============================================================================
 // Search Engine — Dual Signal (fzf + semantic)
@@ -70,7 +72,7 @@ function matchTags(entry: MemoryEntry, tags?: string[], tagsAny?: string[], tags
 // Tool Definition
 // =============================================================================
 
-export function getTelescopeToolDefs(): Record<string, ToolDef> {
+export function getTelescopeToolDefs(z: ZodLib): Record<string, ToolDef> {
   const search: ToolDef = {
     description:
       "Unified search across memory entries. " +
