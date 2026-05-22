@@ -21,11 +21,11 @@ import { getMemoryToolDefs } from "stellario/defs/memory"
 
 const defs = getMemoryToolDefs()
 
-export const memory_create  = tool(defs.create)
-export const memory_show    = tool(defs.show)
-export const memory_revise  = tool(defs.revise)
-export const memory_forget  = tool(defs.forget)
-export const memory_history = tool(defs.history)
+export const create  = tool(defs.create)
+export const show    = tool(defs.show)
+export const revise  = tool(defs.revise)
+export const forget  = tool(defs.forget)
+export const history = tool(defs.history)
 `
 
 const TELESCOPE_GLUE = `import { tool } from "@opencode-ai/plugin"
@@ -33,7 +33,7 @@ import { getTelescopeToolDefs } from "stellario/defs/telescope"
 
 const defs = getTelescopeToolDefs()
 
-export const telescope_search = tool(defs.search)
+export const search = tool(defs.search)
 `
 
 const WORKSPACE_GLUE = `import { tool } from "@opencode-ai/plugin"
@@ -41,7 +41,7 @@ import { getWorkspaceToolDefs } from "stellario/defs/workspace"
 
 const defs = getWorkspaceToolDefs()
 
-export const workspace_status = tool(defs.status)
+export const status = tool(defs.status)
 `
 
 // ── Main ──────────────────────────────────────────────────────────────────
@@ -188,9 +188,9 @@ writeGlue(toolsDir, "stellario-workspace.ts", WORKSPACE_GLUE)
 const agentsDir = join(opencodeDir, "agents")
 mkdirSync(agentsDir, { recursive: true })
 
-const memoryTools = ["memory_create", "memory_show", "memory_revise", "memory_forget", "memory_history"]
-const searchTools = ["telescope_search"]
-const workspaceTools = ["workspace_status"]
+const memoryTools = ["stellario-memory_create", "stellario-memory_show", "stellario-memory_revise", "stellario-memory_forget", "stellario-memory_history"]
+const searchTools = ["stellario-telescope_search"]
+const workspaceTools = ["stellario-workspace_status"]
 
 for (const agent of agents) {
   const agentPath = join(agentsDir, `${agent}.md`)
