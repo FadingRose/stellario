@@ -44,6 +44,29 @@ const defs = getWorkspaceToolDefs()
 export const status = tool(defs.status)
 `
 
+const INJECTOR_PLUGIN = `import type { Plugin } from "@opencode-ai/plugin"
+import { buildStatus } from "stellario/defs/workspace"
+
+export default (async ({ directory, project }) => {
+  return {
+    "experimental.chat.system.transform": (messages) => {
+      // Inject workspace status (including dynamic prompt) into the first system message
+      if (!messages || messages.length === 0) return
+
+      try {
+        const status = buildStatus(directory, "stellario")
+        const systemMsg = messages.find((m) => m.role === "system")
+        if (systemMsg) {
+          systemMsg.content = systemMsg.content + "\\n\\n" + status
+        }
+      } catch {
+        // Memory not initialized yet — silently skip
+      }
+    },
+  }
+}) satisfies Plugin
+`
+
 // ── Main ──────────────────────────────────────────────────────────────────
 
 const args = process.argv.slice(2)
@@ -183,6 +206,12 @@ writeGlue(toolsDir, "stellario-memory.ts", MEMORY_GLUE)
 writeGlue(toolsDir, "stellario-telescope.ts", TELESCOPE_GLUE)
 writeGlue(toolsDir, "stellario-workspace.ts", WORKSPACE_GLUE)
 
+// ── 5b. Plugin injector ─────────────────────────────────────────────────────
+
+const pluginDir = join(opencodeDir, "plugin")
+mkdirSync(pluginDir, { recursive: true })
+writeGlue(pluginDir, "stellario-inject.ts", INJECTOR_PLUGIN)
+
 // ── 6. Agent skeletons ─────────────────────────────────────────────────────
 
 const agentsDir = join(opencodeDir, "agents")
@@ -235,6 +264,18 @@ for (const agent of agents) {
 
   const toolsYaml = agentTools.join("\n")
 
+  const agentBody = isPrimary
+    ? `# ${display}
+
+Your operational context is auto-injected from memory via plugin.
+If the plugin is not active, call workspace_status to bootstrap.
+
+Volumes: ${accessibleVolumes.join(", ")}`
+    : `# ${display}
+
+Volumes: ${accessibleVolumes.join(", ")}
+`
+
   const content = `---
 description: ${display}
 mode: primary
@@ -242,11 +283,7 @@ tools:
 ${toolsYaml}
 ---
 
-# ${display}
-
-Volumes: ${accessibleVolumes.join(", ")}
-
-<!-- Write your agent prompt here -->
+${agentBody}
 `
   writeFileSync(agentPath, content)
   console.log(`✓ Agent: ${agent}.md (${isPrimary ? "primary" : "subagent"})`)
@@ -282,8 +319,8 @@ if (existsSync(gitignorePath)) {
 console.log("")
 console.log("Done! Next steps:")
 console.log(`  1. Edit .opencode/stellario.yaml to customize`)
-console.log(`  2. Edit .opencode/agents/*.md to add prompts`)
-console.log(`  3. Start opencode — tools will be auto-discovered`)
+console.log(`  2. Create type:prompt entries in meta volume for dynamic prompts`)
+console.log(`  3. Start opencode — tools, plugin, and prompts auto-discovered`)
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 

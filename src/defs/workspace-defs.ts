@@ -1,43 +1,167 @@
 import { z } from "zod"
-import type { ToolContext, ToolDef } from "../types.js"
+import type { ToolContext, ToolDef, StellarioConfig, MemoryEntry } from "../types.js"
 import { resolveContext } from "../context.js"
 import { resolveAgent, canRead } from "../permissions.js"
-import { readJsonl, readVolumeIndex, extractTitle, truncate, findEntry, getActiveWorkspace } from "../store.js"
-import { getMemoryDir, getWorkspaceVolume, getTrackedVolumes } from "../config.js"
+import { readJsonl, readVolumeIndex, extractTitle, truncate, findEntry, getActiveWorkspace, ensureStringArray } from "../store.js"
+import { loadConfig, getMemoryDir, getWorkspaceVolume, getTrackedVolumes } from "../config.js"
 import { existsSync, readFileSync } from "fs"
 import { join } from "path"
+
+// =============================================================================
+// Reusable Status Builder (used by both tool and plugin injector)
+// =============================================================================
+
+/**
+ * Build the full workspace status string for a given project + agent.
+ * This is the single source of truth — used by the tool AND the plugin injector.
+ */
+export function buildStatus(projectRoot: string, agentName: string): string {
+  const config = loadConfig(projectRoot)
+  const memDir = getMemoryDir(config, projectRoot)
+
+  const lines: string[] = []
+  lines.push(`Memory dir: ${memDir}`)
+  lines.push(`Agent: ${agentName}`)
+  lines.push("")
+
+  if (!existsSync(memDir)) {
+    lines.push("Memory: empty (not initialized)")
+    return lines.join("\n")
+  }
+
+  // ── Volume stats ──
+  const volumeIndex = readVolumeIndex(memDir)
+  const indexMap = new Map(volumeIndex.map(e => [e.volume, e]))
+  const parts: string[] = []
+
+  for (const [name, def] of Object.entries(config.volumes)) {
+    const idx = indexMap.get(name)
+    let count = 0
+    if (idx) {
+      for (const file of idx.files) {
+        const filePath = join(memDir, file)
+        if (existsSync(filePath)) {
+          const content = readFileSync(filePath, "utf-8")
+          count += content.trim().split("\n").filter(line => line.trim()).length
+        }
+      }
+    } else {
+      const filePath = join(memDir, `${name}.jsonl`)
+      if (existsSync(filePath)) {
+        const content = readFileSync(filePath, "utf-8")
+        count = content.trim().split("\n").filter(line => line.trim()).length
+      }
+    }
+    if (count > 0) parts.push(`${name}: ${count}`)
+  }
+
+  const archivedPath = join(memDir, "archived.jsonl")
+  if (existsSync(archivedPath)) {
+    const content = readFileSync(archivedPath, "utf-8")
+    const count = content.trim().split("\n").filter(line => line.trim()).length
+    if (count > 0) parts.push(`archived: ${count}`)
+  }
+
+  lines.push(`Volumes: ${parts.length > 0 ? parts.join(", ") : "empty"}`)
+
+  // ── Active workspace ──
+  const workspaceVol = getWorkspaceVolume(config)
+  if (workspaceVol) {
+    const activeId = getActiveWorkspace(memDir, workspaceVol)
+    lines.push("")
+    lines.push("\u2500\u2500\u2500")
+
+    if (activeId) {
+      const found = findEntry(memDir, activeId, config)
+      if (found) {
+        const refs = found.entry.refs || []
+        lines.push(`Workspace: [${activeId}] ${extractTitle(found.entry.content)}`)
+        if (refs.length > 0) {
+          lines.push(`  refs: ${refs.map(r => r.target).join(", ")}`)
+        }
+        lines.push(`Use memory_show(id="${activeId}") to expand`)
+      } else {
+        lines.push(`Workspace: [${activeId}] (not found)`)
+      }
+    } else {
+      lines.push("Workspace: (none)")
+      lines.push(`\uD83D\uDCA1 Create one: memory_create(volume="${workspaceVol}", content="...", tags=["type:workspace"])`)
+    }
+  }
+
+  // ── Latest handover (append volumes) ──
+  const appendVolumes = Object.entries(config.volumes)
+    .filter(([, def]) => def.profile === "append")
+    .map(([name]) => name)
+
+  for (const appendVol of appendVolumes) {
+    const entries = readJsonl(memDir, appendVol)
+    const latest = entries[entries.length - 1]
+    if (latest) {
+      lines.push("")
+      lines.push("\u2500\u2500\u2500")
+      lines.push(`Latest ${appendVol}: ${latest.id} (${latest.created})`)
+      lines.push(`Title: ${extractTitle(latest.content)}`)
+      lines.push("")
+      lines.push(latest.content)
+    }
+  }
+
+  // ── Dynamic prompt injection (type:prompt entries in meta) ──
+  const metaVol = findMetaVolume(config)
+  if (metaVol) {
+    const metaEntries = readJsonl(memDir, metaVol)
+    const promptEntries = metaEntries.filter(e =>
+      e.tags.some(t => t === "type:prompt")
+    )
+
+    if (promptEntries.length > 0) {
+      lines.push("")
+      lines.push("\u2500\u2500\u2500")
+      lines.push(`Prompt (${promptEntries.length} entries from ${metaVol}):`)
+      lines.push("")
+      for (const entry of promptEntries) {
+        lines.push(`[${entry.id}]`)
+        lines.push(entry.content)
+        lines.push("")
+      }
+    }
+  }
+
+  return lines.join("\n")
+}
+
+/**
+ * Find the meta volume name (first mutable volume named "meta", or null).
+ */
+function findMetaVolume(config: StellarioConfig): string | null {
+  for (const [name, def] of Object.entries(config.volumes)) {
+    if (name === "meta" && def.profile === "mutable") return name
+  }
+  return null
+}
+
+// =============================================================================
+// Tool Definition
+// =============================================================================
 
 export function getWorkspaceToolDefs(): Record<string, ToolDef> {
   const status: ToolDef = {
     description:
-      "Bootstrap overview: memory directory, volume stats, active workspace, and latest handoff.",
+      "Memory dashboard: volume stats, active workspace, latest handoff, and dynamic prompt. " +
+      "Auto-injected via plugin on session start — only call this manually for debugging or inspection.",
     args: {},
     async execute(_args, context: ToolContext) {
       const ctx = resolveContext(context)
       const agent = resolveAgent(context.agent, ctx.config)
-
       if (!agent) return `\u274c Unknown agent: "${context.agent}"`
 
-      const lines: string[] = []
-      lines.push(`Memory dir: ${ctx.memDir}`)
-      lines.push(`Agent: ${agent}`)
-      lines.push("")
+      return buildStatus(ctx.projectRoot, agent)
+    },
+  }
 
-      if (existsSync(ctx.memDir)) {
-        const volumeIndex = readVolumeIndex(ctx.memDir)
-        const indexMap = new Map(volumeIndex.map(e => [e.volume, e]))
-        const parts: string[] = []
-
-        for (const [name, def] of Object.entries(ctx.config.volumes)) {
-          const idx = indexMap.get(name)
-          let count = 0
-          if (idx) {
-            for (const file of idx.files) {
-              const filePath = join(ctx.memDir, file)
-              if (existsSync(filePath)) {
-                const content = readFileSync(filePath, "utf-8")
-                count += content.trim().split("\n").filter(line => line.trim()).length
-              }
+  return { status }
+}
             }
           } else {
             const filePath = join(ctx.memDir, `${name}.jsonl`)
