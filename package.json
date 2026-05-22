@@ -32,5 +32,13 @@
     "memory",
     "knowledge"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "files": [
+    "src/",
+    "templates/"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FadingRose/stellario.git"
+  }
 }

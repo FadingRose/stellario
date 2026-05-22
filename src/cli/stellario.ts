@@ -81,21 +81,18 @@ function init(projectRoot: string, template: string) {
   if (existsSync(configPath)) {
     console.log(`⚠  Config already exists: ${configPath} (skipped)`)
   } else {
-    const templateDir = resolve(join(import.meta.dirname || ".", "..", "..", "templates"))
-    const templatePath = join(templateDir, `${template}.yaml`)
+    // Templates are in <package-root>/templates/
+    const packageRoot = resolve(join(import.meta.dirname || ".", "..", ".."))
+    const templatePath = join(packageRoot, "templates", `${template}.yaml`)
 
     if (!existsSync(templatePath)) {
-      // Fallback: try relative to cwd (for npx)
-      const fallback = resolve(join("templates", `${template}.yaml`))
-      if (!existsSync(fallback)) {
-        console.error(`Template not found: ${template}`)
-        process.exit(1)
-      }
+      console.error(`Template not found: ${templatePath}`)
+      console.error(`Available templates: ${TEMPLATES.join(", ")}`)
+      process.exit(1)
     }
 
     mkdirSync(opencodeDir, { recursive: true })
-    const src = existsSync(templatePath) ? templatePath : resolve(join("templates", `${template}.yaml`))
-    cpSync(src, configPath)
+    cpSync(templatePath, configPath)
     console.log(`✓ Config: ${configPath}`)
   }
 
@@ -133,7 +130,7 @@ function init(projectRoot: string, template: string) {
       dependencies: {
         "@opencode-ai/plugin": "latest",
         zod: "^3.23.0",
-        stellario: `file:${relativeMemDir(projectRoot)}`,
+        stellario: getStellarioDep(),
       },
     }
     writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n")
@@ -144,7 +141,7 @@ function init(projectRoot: string, template: string) {
     const existingPkg = JSON.parse(readFileSync(pkgPath, "utf-8"))
     const deps = existingPkg.dependencies || {}
     if (!deps.stellario) {
-      deps.stellario = `file:${relativeMemDir(projectRoot)}`
+      deps.stellario = getStellarioDep()
       existingPkg.dependencies = deps
       writeFileSync(pkgPath, JSON.stringify(existingPkg, null, 2) + "\n")
       needsInstall = true
@@ -320,12 +317,26 @@ Volumes: ${volumes.join(", ")}
 // Helpers
 // =============================================================================
 
-function relativeMemDir(projectRoot: string): string {
-  // stellario is installed via file: protocol
-  // We need the path from .opencode/ to the stellario package
-  // For now, assume stellario is installed globally or via npx
-  // Users can edit this path manually
-  return "../../stellario"
+const STELLARIO_REPO = "github:FadingRose/stellario"
+
+/**
+ * Get the stellario version from our own package.json.
+ * Used to pin the dependency to the same version.
+ */
+function getStellarioVersion(): string {
+  try {
+    const pkgPath = resolve(join(import.meta.dirname || ".", "..", "..", "package.json"))
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"))
+    return pkg.version || "latest"
+  } catch {
+    return "latest"
+  }
+}
+
+function getStellarioDep(): string {
+  const version = getStellarioVersion()
+  if (version === "latest") return STELLARIO_REPO
+  return `${STELLARIO_REPO}#v${version}`
 }
 
 // ── Run ──────────────────────────────────────────────────────────────────
