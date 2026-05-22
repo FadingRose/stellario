@@ -27,39 +27,32 @@ stellario.yaml          ← you define volumes, agents, permissions
 │   core library   │   • config loader + validator
 │                  │   • JSONL storage engine
 │                  │   • permission engine
+│                  │   • semantic search (embedding)
 │                  │   • tool factories (for opencode)
 └─────────────────┘
         │
         ▼
-  .stellario/           ← runtime data (JSONL + git)
+  .opencode/memory/      ← runtime data (JSONL + git)
     volumes.jsonl
     active.jsonl
     drafting.jsonl
+    keywords-index.jsonl  ← embedding vectors (generated)
     ...
 ```
 
 ## Quick Start
 
-### 1. Install
+### 1. Init
 
 ```bash
-# In your project
-npm install /path/to/stellario
+npx github:FadingRose/stellario init --template software
 ```
 
-Or via `file:` protocol in `package.json`:
-
-```json
-{
-  "dependencies": {
-    "stellario": "file:../stellario"
-  }
-}
-```
+This scaffolds everything inside `.opencode/` — config, tools, agents, plugin, memory directory with its own git repo.
 
 ### 2. Configure
 
-Create `stellario.yaml` in your project root:
+Edit `.opencode/stellario.yaml`:
 
 ```yaml
 memoryDir: ".stellario"
@@ -83,6 +76,7 @@ volumes:
 agents:
   stellario:
     display: "Stellario"
+    role: primary
 ```
 
 See `templates/` for ready-made configs:
@@ -90,22 +84,26 @@ See `templates/` for ready-made configs:
 - `novel.yaml` — multi-agent fiction writing (Lilac-compatible)
 - `software.yaml` — multi-agent software development
 
-### 3. Use (Core API)
+### 3. Use (opencode Tools)
+
+Tools are auto-discovered by opencode. Available tools:
+
+- `memory_create` — write entry to a volume
+- `memory_show` — read entry by ID
+- `memory_revise` — edit content / manage refs
+- `memory_forget` — archive an entry
+- `memory_history` — view git revision history
+- `search` — unified search (text + tags + semantic)
+- `status` — workspace overview (volume stats, active context, dynamic prompt)
+
+### 4. Core API
 
 ```typescript
-import { loadConfig } from "stellario/config"
-import { canWrite, writableVolumes } from "stellario/permissions"
-import { generateNextId, writeEntries, readJsonl, findEntry } from "stellario/store"
-```
+import { getMemoryToolDefs, getTelescopeToolDefs, getWorkspaceToolDefs } from "stellario"
 
-### 4. Use (opencode Tools)
-
-```typescript
-import { createMemoryTools, createWorkspaceTools, createTelescopeTool } from "stellario"
-
-const { create, show, revise, forget, history } = createMemoryTools()
-const { status } = createWorkspaceTools()
-const { search } = createTelescopeTool()
+const memory = getMemoryToolDefs()
+const telescope = getTelescopeToolDefs()
+const workspace = getWorkspaceToolDefs()
 ```
 
 ## Core Concepts
@@ -215,6 +213,11 @@ agents:
 tags:
   namespaces?: [string, ...]  # allowed tag namespaces
   typeValues?: [string, ...]  # closed vocabulary for type:* tags
+
+# Optional: semantic search
+embedding:
+  enabled?: true | false | auto  # default: auto (probe at runtime)
+  model?: string                 # default: "Xenova/all-MiniLM-L6-v2"
 ```
 
 Full docs: [docs/configuration.md](docs/configuration.md)
@@ -223,13 +226,14 @@ Full docs: [docs/configuration.md](docs/configuration.md)
 
 | Module | Exports | Purpose |
 |--------|---------|---------|
-| `stellario/config` | `loadConfig`, `validateConfig`, `getVolumeIdPrefix`, `getMemoryDir`, `getTrackedVolumes`, `getWorkspaceVolume` | Load and query `stellario.yaml` |
-| `stellario/store` | `readJsonl`, `writeEntries`, `generateNextId`, `findEntry`, `getActiveWorkspace`, `setActiveWorkspace`, `readVolumeIndex`, `extractTitle`, `truncate`, `today`, `dedupeTags` | JSONL storage engine |
-| `stellario/permissions` | `resolveAgent`, `canRead`, `canWrite`, `canRevise`, `canForget`, `isAuthor`, `readableVolumes`, `writableVolumes`, `canCrossStory` | Config-driven permission checks |
-| `stellario/git` | `gitCommit`, `isGitRepo`, `initGitRepo` | Git integration |
-| `stellario/context` | `resolveContext`, `isRustProject`, `hasOpencodeConfig`, `getRustCrates` | Runtime context resolution |
-| `stellario/types` | `Profile`, `ProfileBehavior`, `VolumeDef`, `StellarioConfig`, `MemoryEntry`, `ToolContext`, etc. | Type definitions |
-| `stellario` (index) | `createMemoryTools`, `createWorkspaceTools`, `createTelescopeTool` | opencode tool factories |
+| `stellario/config` | `loadConfig`, `getVolumeIdPrefix`, `getMemoryDir`, `getTrackedVolumes`, `getWorkspaceVolume` | Load and query `stellario.yaml` |
+| `stellario/store` | `readJsonl`, `writeEntries`, `generateNextId`, `findEntry`, `getActiveWorkspace`, `setActiveWorkspace`, `extractTitle`, `truncate`, `today`, `dedupeTags` | JSONL storage engine |
+| `stellario/permissions` | `resolveAgent`, `canRead`, `canWrite`, `canRevise`, `canForget`, `isAuthor` | Config-driven permission checks |
+| `stellario/embedding` | `embed`, `embedBatch`, `semanticSearch`, `updateEntryIndex`, `removeEntryIndex`, `rebuildIndex`, `probeEmbeddingAvailability`, `cosineSimilarity` | Semantic search / embedding engine |
+| `stellario/git` | `gitCommit` | Git integration |
+| `stellario/context` | `resolveContext` | Runtime context resolution |
+| `stellario/types` | `Profile`, `ProfileBehavior`, `VolumeDef`, `StellarioConfig`, `EmbeddingConfig`, `MemoryEntry`, `ToolContext`, etc. | Type definitions |
+| `stellario` (index) | `getMemoryToolDefs`, `getTelescopeToolDefs`, `getWorkspaceToolDefs`, `embedding` | opencode tool factories + embedding namespace |
 
 Full docs: [docs/api.md](docs/api.md)
 
@@ -241,25 +245,42 @@ src/
 ├── config.ts         stellario.yaml loader + validator
 ├── store.ts          JSONL read/write, volume index, ID generation
 ├── permissions.ts    Agent resolution + permission engine
+├── embedding.ts      Semantic search (embed, index, cosine similarity)
 ├── git.ts            Git commit integration
 ├── context.ts        Project detection + context resolution
 ├── index.ts          Public API (tool factory re-exports)
-└── tools/
-    ├── memory.ts     create / show / revise / forget / history
-    ├── workspace.ts  status overview
-    └── telescope.ts  unified search (text + tags + keywords)
+└── defs/
+    ├── memory-defs.ts     create / show / revise / forget / history
+    ├── workspace-defs.ts  status overview
+    └── telescope-defs.ts  unified search (fzf text + semantic)
 ```
+
+### Semantic Search
+
+Telescope uses hybrid scoring to combine exact text matching with vector similarity:
+
+```
+query → embed → cosine similarity against keyword index → semantic score
+query → split terms → fzf text matching → fzf score
+final score = fzf_score + semantic_score × 0.5
+```
+
+- **Model**: `all-MiniLM-L6-v2` via `@huggingface/transformers` (384-dim, ~22MB)
+- **Index**: `keywords-index.jsonl` per memory directory, auto-maintained
+- **Graceful degradation**: if embedding unavailable, falls back to text-only search
+- **Env override**: `STELLARIO_EMBEDDING=off` to disable
 
 ### Data Flow
 
 ```
 Tool call → resolveContext() → loadConfig()
-                              → getMemoryDir()
-                              → resolveAgent()
-         → permission check
-         → store operation (readJsonl / writeEntries / generateNextId)
-         → git commit (if tracked volume)
-         → return formatted result
+                               → getMemoryDir()
+                               → resolveAgent()
+          → permission check
+          → store operation (readJsonl / writeEntries / generateNextId)
+          → embedding update (async, if keywords changed)
+          → git commit (if tracked volume)
+          → return formatted result
 ```
 
 ### Naming Metaphor
