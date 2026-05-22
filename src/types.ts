@@ -133,6 +133,18 @@ export interface ToolContext {
   agent: string
 }
 
+// ─── Tool Definition ─────────────────────────────────────────────────────────
+
+/**
+ * A pure tool definition — no runtime coupling.
+ * Glue files call tool() from @opencode-ai/plugin with these objects.
+ */
+export interface ToolDef<A = any> {
+  description: string
+  args: A
+  execute: (args: any, context: ToolContext) => Promise<string>
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /**

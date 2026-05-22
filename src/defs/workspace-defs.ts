@@ -1,21 +1,14 @@
-import { tool } from "@opencode-ai/plugin"
 import { z } from "zod"
-import { existsSync, readFileSync } from "fs"
-import { join } from "path"
-import type { ToolContext } from "../types.js"
+import type { ToolContext, ToolDef } from "../types.js"
 import { resolveContext } from "../context.js"
 import { resolveAgent, canRead } from "../permissions.js"
 import { readJsonl, readVolumeIndex, extractTitle, truncate, findEntry, getActiveWorkspace } from "../store.js"
 import { getMemoryDir, getWorkspaceVolume, getTrackedVolumes } from "../config.js"
+import { existsSync, readFileSync } from "fs"
+import { join } from "path"
 
-// =============================================================================
-// Tool Factory
-// =============================================================================
-
-export function createWorkspaceTools() {
-  // ── status ─────────────────────────────────────────────────────────────
-
-  const status = tool({
+export function getWorkspaceToolDefs(): Record<string, ToolDef> {
+  const status: ToolDef = {
     description:
       "Bootstrap overview: memory directory, volume stats, active workspace, and latest handoff.",
     args: {},
@@ -30,7 +23,6 @@ export function createWorkspaceTools() {
       lines.push(`Agent: ${agent}`)
       lines.push("")
 
-      // Volume stats
       if (existsSync(ctx.memDir)) {
         const volumeIndex = readVolumeIndex(ctx.memDir)
         const indexMap = new Map(volumeIndex.map(e => [e.volume, e]))
@@ -57,7 +49,6 @@ export function createWorkspaceTools() {
           if (count > 0) parts.push(`${name}: ${count}`)
         }
 
-        // Archived
         const archivedPath = join(ctx.memDir, "archived.jsonl")
         if (existsSync(archivedPath)) {
           const content = readFileSync(archivedPath, "utf-8")
@@ -67,7 +58,6 @@ export function createWorkspaceTools() {
 
         lines.push(`Volumes: ${parts.length > 0 ? parts.join(", ") : "empty"}`)
 
-        // Active workspace
         const workspaceVol = getWorkspaceVolume(ctx.config)
         if (workspaceVol) {
           const activeId = getActiveWorkspace(ctx.memDir, workspaceVol)
@@ -92,7 +82,6 @@ export function createWorkspaceTools() {
           }
         }
 
-        // Latest handoff (append volume)
         const appendVolumes = Object.entries(ctx.config.volumes)
           .filter(([, def]) => def.profile === "append")
           .map(([name]) => name)
@@ -115,7 +104,7 @@ export function createWorkspaceTools() {
 
       return lines.join("\n")
     },
-  })
+  }
 
   return { status }
 }

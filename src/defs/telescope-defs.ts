@@ -1,10 +1,9 @@
-import { tool } from "@opencode-ai/plugin"
 import { z } from "zod"
-import { existsSync } from "fs"
-import type { ToolContext, MemoryEntry } from "../types.js"
+import type { ToolContext, MemoryEntry, ToolDef } from "../types.js"
 import { resolveContext } from "../context.js"
 import { resolveAgent, canRead } from "../permissions.js"
 import { readJsonl, extractTitle, truncate } from "../store.js"
+import { existsSync } from "fs"
 
 // =============================================================================
 // Search Engine
@@ -16,10 +15,6 @@ interface SearchResult {
   score: number
 }
 
-/**
- * Text matching: check if query terms appear in content, tags, or keywords.
- * Returns a score based on match quality.
- */
 function textMatch(entry: MemoryEntry, terms: string[]): number {
   const text = `${entry.content} ${entry.tags.join(" ")} ${(entry.keywords || []).join(" ")}`.toLowerCase()
   let score = 0
@@ -27,22 +22,13 @@ function textMatch(entry: MemoryEntry, terms: string[]): number {
     const lower = term.toLowerCase()
     if (text.includes(lower)) {
       score += 1
-      // Boost for tag match
-      if (entry.tags.some(t => t.toLowerCase().includes(lower))) {
-        score += 2
-      }
-      // Boost for keyword match
-      if ((entry.keywords || []).some(k => k.toLowerCase().includes(lower))) {
-        score += 1
-      }
+      if (entry.tags.some(t => t.toLowerCase().includes(lower))) score += 2
+      if ((entry.keywords || []).some(k => k.toLowerCase().includes(lower))) score += 1
     }
   }
   return score
 }
 
-/**
- * Filter entries by tag requirements.
- */
 function matchTags(entry: MemoryEntry, tags?: string[], tagsAny?: string[], tagsNot?: string[]): boolean {
   if (tags && tags.length > 0) {
     if (!tags.every(t => entry.tags.includes(t))) return false
@@ -57,11 +43,11 @@ function matchTags(entry: MemoryEntry, tags?: string[], tagsAny?: string[], tags
 }
 
 // =============================================================================
-// Tool Factory
+// Tool Definition
 // =============================================================================
 
-export function createTelescopeTool() {
-  const search = tool({
+export function getTelescopeToolDefs(): Record<string, ToolDef> {
+  const search: ToolDef = {
     description:
       "Unified search across memory entries. " +
       "Supports text matching, tag filtering, and keyword discovery. " +
@@ -91,16 +77,13 @@ export function createTelescopeTool() {
         return "Memory directory not found. Create entries first."
       }
 
-      // Determine searchable volumes
       const allVolumes = Object.keys(ctx.config.volumes)
       const readable = allVolumes.filter(v => canRead(agent, v, ctx.config))
-      // Also check archived
-      const canReadArchived = true // archived is frozen with read: [all]
+      const canReadArchived = true
       const searchableVolumes = args.volumes
         ? args.volumes.filter(v => readable.includes(v) || (v === "archived" && canReadArchived))
         : [...readable, ...(canReadArchived ? ["archived"] : [])]
 
-      // Collect all entries from searchable volumes
       const allEntries: Array<{ entry: MemoryEntry; volume: string }> = []
       for (const vol of searchableVolumes) {
         for (const entry of readJsonl(ctx.memDir, vol)) {
@@ -108,7 +91,7 @@ export function createTelescopeTool() {
         }
       }
 
-      // ── Tag enumeration mode ──────────────────────────────────────────
+      // Tag enumeration mode
       if (args.returns === "tags") {
         const tagCounts = new Map<string, number>()
         let filtered = allEntries
@@ -131,7 +114,7 @@ export function createTelescopeTool() {
         return sorted.map(([tag, count]) => `${tag} (${count})`).join("\n")
       }
 
-      // ── Keyword enumeration mode ──────────────────────────────────────
+      // Keyword enumeration mode
       if (args.returns === "keywords") {
         const kwCounts = new Map<string, number>()
         let filtered = allEntries
@@ -148,16 +131,14 @@ export function createTelescopeTool() {
         return sorted.map(([kw, count]) => `${kw} (${count})`).join("\n")
       }
 
-      // ── Entry search mode ─────────────────────────────────────────────
+      // Entry search mode
       let results: SearchResult[] = []
 
-      // Tag-only filter (no query)
       if (!args.query && (args.tags || args.tags_any || args.tags_not)) {
         results = allEntries
           .filter(({ entry }) => matchTags(entry, args.tags, args.tags_any, args.tags_not))
           .map(({ entry, volume }) => ({ entry, volume, score: 1 }))
       }
-      // Query-based search
       else if (args.query) {
         const terms = args.query.split(/\s+/).filter(Boolean)
         results = allEntries
@@ -169,9 +150,7 @@ export function createTelescopeTool() {
           }))
           .filter(r => r.score > 0)
       }
-      // No query, no tags — overview mode
       else {
-        // Count per volume
         const counts = new Map<string, number>()
         for (const { volume } of allEntries) {
           counts.set(volume, (counts.get(volume) || 0) + 1)
@@ -180,7 +159,6 @@ export function createTelescopeTool() {
         return `Memory overview (${allEntries.length} entries)\n${parts.join(", ")}`
       }
 
-      // Sort by score desc, then by created desc
       results.sort((a, b) => {
         if (b.score !== a.score) return b.score - a.score
         return (b.entry.created || "").localeCompare(a.entry.created || "")
@@ -196,7 +174,7 @@ export function createTelescopeTool() {
         return `[${entry.id}] ${volume} ${score.toFixed(0)} \u2014 ${title}`
       }).join("\n")
     },
-  })
+  }
 
   return { search }
 }

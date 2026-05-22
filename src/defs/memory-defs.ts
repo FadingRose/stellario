@@ -1,6 +1,5 @@
-import { tool } from "@opencode-ai/plugin"
 import { z } from "zod"
-import type { StellarioConfig, MemoryEntry, MemoryRef, ToolContext } from "../types.js"
+import type { StellarioConfig, MemoryEntry, MemoryRef, ToolContext, ToolDef } from "../types.js"
 import { profileBehavior } from "../types.js"
 import { resolveContext, type ResolvedContext } from "../context.js"
 import { resolveAgent, canRead, canWrite, canRevise, canForget, isAuthor } from "../permissions.js"
@@ -52,17 +51,11 @@ function formatRefs(refs: MemoryRef[]): string {
 }
 
 // =============================================================================
-// Tool Factory
+// Tool Definitions
 // =============================================================================
 
-/**
- * Create the 5 memory tools (create, revise, forget, show, history).
- * Returns named exports ready for opencode registration.
- */
-export function createMemoryTools() {
-  // ── create ──────────────────────────────────────────────────────────────
-
-  const create = tool({
+export function getMemoryToolDefs(): Record<string, ToolDef> {
+  const create: ToolDef = {
     description:
       "Create a memory entry in a specified volume. " +
       "Volume determines storage location; permissions are auto-checked. " +
@@ -88,14 +81,9 @@ export function createMemoryTools() {
         return `\u274c Agent "${agent}" cannot write to volume "${args.volume}".`
       }
 
-      if (!profileBehavior(def.profile).isTracked) {
-        // scratch volume: no tag/keyword enforcement
-      }
-
       let tags = args.tags || []
       tags = dedupeTags(tags)
 
-      // Enforce required tag prefix
       if (def.requiredTagPrefix) {
         if (!tags.some(t => t.startsWith(def.requiredTagPrefix!))) {
           return `\u274c Entries in "${args.volume}" must have a tag with prefix "${def.requiredTagPrefix}".`
@@ -139,11 +127,9 @@ export function createMemoryTools() {
 
       return lines.join("\n")
     },
-  })
+  }
 
-  // ── show ────────────────────────────────────────────────────────────────
-
-  const show = tool({
+  const show: ToolDef = {
     description:
       "Read a memory entry by ID. Shows full content with line numbers, tags, and refs. " +
       "For entries in the workspace volume, automatically activates as current context.",
@@ -188,7 +174,6 @@ export function createMemoryTools() {
         lines.push(formatRefs(refs))
       }
 
-      // Activate if workspace volume
       const workspaceVol = getWorkspaceVolume(ctx.config)
       if (workspaceVol && volume === workspaceVol) {
         setActiveWorkspace(ctx.memDir, workspaceVol, args.id)
@@ -198,11 +183,9 @@ export function createMemoryTools() {
 
       return lines.join("\n")
     },
-  })
+  }
 
-  // ── revise ─────────────────────────────────────────────────────────────
-
-  const revise = tool({
+  const revise: ToolDef = {
     description:
       "Edit a memory entry: modify content lines and/or manage refs. " +
       "Content edits use line ranges. Changes are committed to git automatically.",
@@ -248,7 +231,6 @@ export function createMemoryTools() {
 
       const changes: string[] = []
 
-      // Content edits
       let newContent = entry.content
       if (args.edits && args.edits.length > 0) {
         const lines = entry.content.split("\n")
@@ -278,7 +260,6 @@ export function createMemoryTools() {
         changes.push(`content(${parsedEdits.map((e) => e.rawRange).join(", ")})`)
       }
 
-      // Refs edits
       let newRefs: MemoryRef[] = [...(entry.refs || [])]
 
       if (args.refs_remove && args.refs_remove.length > 0) {
@@ -318,20 +299,16 @@ export function createMemoryTools() {
 
       const commitHash = gitCommit(ctx.memDir, volume, `revise: ${args.message}\n\nEntry: ${args.id}\nChanges: ${changes.join(", ")}`, ctx.config)
 
-      const resultLines = [
+      return [
         `Revised [${args.id}] \u2192 ${volume}`,
         `Changes: ${changes.join(", ")}`,
         commitHash ? `Commit: ${commitHash}` : "(volume not version-controlled)",
         `Message: ${args.message}`,
-      ]
-
-      return resultLines.join("\n")
+      ].join("\n")
     },
-  })
+  }
 
-  // ── forget ─────────────────────────────────────────────────────────────
-
-  const forget = tool({
+  const forget: ToolDef = {
     description:
       "Archive a memory entry. Moves to 'archived' (frozen, read-only). " +
       "Only the entry's author can archive it. Append volumes cannot be archived.",
@@ -365,7 +342,6 @@ export function createMemoryTools() {
       }
       writeEntries(ctx.memDir, volume, filtered, ctx.config)
 
-      // Add to archived
       const archivedEntry: MemoryEntry = {
         ...entry,
         volume: "archived",
@@ -384,11 +360,9 @@ export function createMemoryTools() {
         commitHash ? `Commit: ${commitHash}` : "(volume not version-controlled)",
       ].join("\n")
     },
-  })
+  }
 
-  // ── history ────────────────────────────────────────────────────────────
-
-  const history = tool({
+  const history: ToolDef = {
     description: "View the git revision history of a memory entry.",
     args: {
       id: z.string().describe("Entry ID."),
@@ -408,10 +382,9 @@ export function createMemoryTools() {
         return `\u274c Agent "${agent}" cannot read volume "${found.volume}".`
       }
 
-      // Delegate to git history lookup (simplified)
       return `History for [${args.id}] in ${found.volume}: (git history lookup - see Lilac implementation for full detail)`
     },
-  })
+  }
 
-  return { create, revise, forget, show, history }
+  return { create, show, revise, forget, history }
 }

@@ -1,19 +1,24 @@
 {
   "name": "stellario",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Agent memory infrastructure — Volume-based knowledge management for opencode",
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
+  "bin": {
+    "stellario": "src/cli/stellario.ts"
+  },
   "exports": {
     ".": "./src/index.ts",
-    "./tools/memory": "./src/tools/memory.ts",
-    "./tools/telescope": "./src/tools/telescope.ts",
-    "./tools/workspace": "./src/tools/workspace.ts"
+    "./defs/memory": "./src/defs/memory-defs.ts",
+    "./defs/telescope": "./src/defs/telescope-defs.ts",
+    "./defs/workspace": "./src/defs/workspace-defs.ts",
+    "./config": "./src/config.ts",
+    "./store": "./src/store.ts",
+    "./permissions": "./src/permissions.ts",
+    "./types": "./src/types.ts"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "latest",
-    "fzf": "^0.5.2",
     "yaml": "^2.4.0",
     "zod": "^3.23.0"
   },
