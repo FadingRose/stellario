@@ -6,7 +6,7 @@ import { resolveAgent, canRead, canWrite, canRevise, canForget, isAuthor } from 
 import {
   readJsonl, writeEntries, generateNextId, findEntry,
   setActiveWorkspace, getActiveWorkspace,
-  today, truncate, extractTitle, dedupeTags,
+  today, truncate, extractTitle, dedupeTags, ensureStringArray, ensureArray,
 } from "../store.js"
 import { gitCommit } from "../git.js"
 import { getWorkspaceVolume } from "../config.js"
@@ -81,8 +81,7 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         return `\u274c Agent "${agent}" cannot write to volume "${args.volume}".`
       }
 
-      let tags = args.tags || []
-      tags = dedupeTags(tags)
+      let tags = dedupeTags(ensureStringArray(args.tags))
 
       if (def.requiredTagPrefix) {
         if (!tags.some(t => t.startsWith(def.requiredTagPrefix!))) {
@@ -90,7 +89,7 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         }
       }
 
-      let keywords = args.keywords || []
+      let keywords = ensureStringArray(args.keywords)
       keywords = [...new Set(keywords.map(k => k.trim()).filter(Boolean))]
 
       const id = generateNextId(ctx.memDir, args.volume, ctx.config)
@@ -204,7 +203,13 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
     },
     async execute(args, context: ToolContext) {
       if (!args.id) return "\u274c revise requires 'id'."
-      const hasMutation = args.edits?.length || args.refs_add?.length || args.refs_remove?.length
+
+      // Defensive: opencode may pass arrays as JSON strings
+      const edits = ensureArray<{ range: string; content: string }>(args.edits)
+      const refs_add = ensureArray<{ target: string; reason: string }>(args.refs_add)
+      const refs_remove = ensureStringArray(args.refs_remove)
+
+      const hasMutation = edits.length || refs_add.length || refs_remove.length
       if (!hasMutation) return "\u274c revise requires at least one of: edits, refs_add, refs_remove."
       if (!args.message) return "\u274c revise requires a 'message'."
 
@@ -232,12 +237,12 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       const changes: string[] = []
 
       let newContent = entry.content
-      if (args.edits && args.edits.length > 0) {
+      if (edits.length > 0) {
         const lines = entry.content.split("\n")
         const totalLines = lines.length
         const parsedEdits: ParsedEdit[] = []
 
-        for (const edit of args.edits) {
+        for (const edit of edits) {
           const result = parseRange(edit.range, totalLines)
           if (typeof result === "string") return `\u274c ${result}`
           parsedEdits.push({ start: result.start, end: result.end, content: edit.content, rawRange: edit.range.trim() })
@@ -262,23 +267,23 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
 
       let newRefs: MemoryRef[] = [...(entry.refs || [])]
 
-      if (args.refs_remove && args.refs_remove.length > 0) {
-        const removeSet = new Set(args.refs_remove)
+      if (refs_remove.length > 0) {
+        const removeSet = new Set(refs_remove)
         const before = newRefs.length
         newRefs = newRefs.filter((r) => !removeSet.has(r.target))
         const removed = before - newRefs.length
         if (removed > 0) changes.push(`refs(-${removed})`)
       }
 
-      if (args.refs_add && args.refs_add.length > 0) {
-        for (const ref of args.refs_add) {
+      if (refs_add.length > 0) {
+        for (const ref of refs_add) {
           const target = findEntry(ctx.memDir, ref.target, ctx.config)
           if (!target) return `\u274c Ref target "${ref.target}" not found.`
           if (ref.target === args.id) return `\u274c Cannot self-reference.`
         }
         const existingTargets = new Set(newRefs.map((r) => r.target))
         let added = 0
-        for (const ref of args.refs_add) {
+        for (const ref of refs_add) {
           if (!existingTargets.has(ref.target)) {
             newRefs.push({ target: ref.target, reason: ref.reason })
             existingTargets.add(ref.target)

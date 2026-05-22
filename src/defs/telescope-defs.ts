@@ -2,7 +2,7 @@ import { z } from "zod"
 import type { ToolContext, MemoryEntry, ToolDef } from "../types.js"
 import { resolveContext } from "../context.js"
 import { resolveAgent, canRead } from "../permissions.js"
-import { readJsonl, extractTitle, truncate } from "../store.js"
+import { readJsonl, extractTitle, truncate, ensureStringArray } from "../store.js"
 import { existsSync } from "fs"
 
 // =============================================================================
@@ -69,6 +69,12 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
         .describe("What to return. 'entries' (default), 'tags' (enumerate tag values), 'keywords' (enumerate keywords)."),
     },
     async execute(args, context: ToolContext) {
+      // Defensive: opencode may pass array params as JSON strings
+      const queryVolumes = ensureStringArray(args.volumes)
+      const queryTags = ensureStringArray(args.tags)
+      const queryTagsAny = ensureStringArray(args.tags_any)
+      const queryTagsNot = ensureStringArray(args.tags_not)
+
       const ctx = resolveContext(context)
       const agent = resolveAgent(context.agent, ctx.config)
       if (!agent) return `\u274c Unknown agent: "${context.agent}"`
@@ -80,8 +86,8 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
       const allVolumes = Object.keys(ctx.config.volumes)
       const readable = allVolumes.filter(v => canRead(agent, v, ctx.config))
       const canReadArchived = true
-      const searchableVolumes = args.volumes
-        ? args.volumes.filter(v => readable.includes(v) || (v === "archived" && canReadArchived))
+      const searchableVolumes = queryVolumes.length > 0
+        ? queryVolumes.filter(v => readable.includes(v) || (v === "archived" && canReadArchived))
         : [...readable, ...(canReadArchived ? ["archived"] : [])]
 
       const allEntries: Array<{ entry: MemoryEntry; volume: string }> = []
@@ -95,8 +101,8 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
       if (args.returns === "tags") {
         const tagCounts = new Map<string, number>()
         let filtered = allEntries
-        if (args.tags || args.tags_any || args.tags_not) {
-          filtered = filtered.filter(({ entry }) => matchTags(entry, args.tags, args.tags_any, args.tags_not))
+        if (queryTags.length || queryTagsAny.length || queryTagsNot.length) {
+          filtered = filtered.filter(({ entry }) => matchTags(entry, queryTags, queryTagsAny, queryTagsNot))
         }
         if (args.query) {
           const prefix = args.query.toLowerCase()
@@ -118,8 +124,8 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
       if (args.returns === "keywords") {
         const kwCounts = new Map<string, number>()
         let filtered = allEntries
-        if (args.tags || args.tags_any || args.tags_not) {
-          filtered = filtered.filter(({ entry }) => matchTags(entry, args.tags, args.tags_any, args.tags_not))
+        if (queryTags.length || queryTagsAny.length || queryTagsNot.length) {
+          filtered = filtered.filter(({ entry }) => matchTags(entry, queryTags, queryTagsAny, queryTagsNot))
         }
         for (const { entry } of filtered) {
           for (const kw of (entry.keywords || [])) {
@@ -134,15 +140,15 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
       // Entry search mode
       let results: SearchResult[] = []
 
-      if (!args.query && (args.tags || args.tags_any || args.tags_not)) {
+      if (!args.query && (queryTags.length || queryTagsAny.length || queryTagsNot.length)) {
         results = allEntries
-          .filter(({ entry }) => matchTags(entry, args.tags, args.tags_any, args.tags_not))
+          .filter(({ entry }) => matchTags(entry, queryTags, queryTagsAny, queryTagsNot))
           .map(({ entry, volume }) => ({ entry, volume, score: 1 }))
       }
       else if (args.query) {
         const terms = args.query.split(/\s+/).filter(Boolean)
         results = allEntries
-          .filter(({ entry }) => matchTags(entry, args.tags, args.tags_any, args.tags_not))
+          .filter(({ entry }) => matchTags(entry, queryTags, queryTagsAny, queryTagsNot))
           .map(({ entry, volume }) => ({
             entry,
             volume,

@@ -38,6 +38,40 @@ export function extractTitle(content: string): string {
   return first.length > 60 ? first.slice(0, 57) + "..." : first
 }
 
+/**
+ * Safely coerce a tool argument to a string array.
+ * opencode may pass array params as JSON strings instead of actual arrays.
+ */
+export function ensureStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value)
+      if (Array.isArray(parsed)) return parsed
+    } catch {
+      // Not valid JSON — treat as empty
+    }
+  }
+  return []
+}
+
+/**
+ * Safely coerce a tool argument to an array of any type.
+ * opencode may pass array params as JSON strings instead of actual arrays.
+ */
+export function ensureArray<T>(value: unknown): T[] {
+  if (Array.isArray(value)) return value
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value)
+      if (Array.isArray(parsed)) return parsed
+    } catch {
+      // Not valid JSON — treat as empty
+    }
+  }
+  return []
+}
+
 export function dedupeTags(tags: string[]): string[] {
   const out: string[] = []
   const seen = new Set<string>()
