@@ -219,25 +219,25 @@ for (const agent of agents) {
 
   // Primary agent gets task delegation + code editing
   if (isPrimary) {
-    agentTools.push("task: true")
-    agentTools.push("edit: true")
-    agentTools.push("bash: true")
+    agentTools.push("  task: true")
+    agentTools.push("  edit: true")
+    agentTools.push("  bash: true")
   }
 
   // Memory tools based on write permissions
   if (canWriteAny) {
-    agentTools.push(...memoryTools.map(t => `${t}: true`))
+    agentTools.push(...memoryTools.map(t => `  ${t}: true`))
   } else {
-    agentTools.push("memory_show: true", "memory_history: true")
+    agentTools.push("  memory_show: true", "  memory_history: true")
   }
-  agentTools.push(...searchTools.map(t => `${t}: true`))
-  agentTools.push(...workspaceTools.map(t => `${t}: true`))
+  agentTools.push(...searchTools.map(t => `  ${t}: true`))
+  agentTools.push(...workspaceTools.map(t => `  ${t}: true`))
 
   const toolsYaml = agentTools.join("\n")
 
   const content = `---
 description: ${display}
-mode: ${isPrimary ? "primary" : "subagent"}
+mode: primary
 tools:
 ${toolsYaml}
 ---
