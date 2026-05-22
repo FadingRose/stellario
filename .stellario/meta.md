@@ -118,3 +118,57 @@ tags: ``
 author: stellario
 
 ---
+
+## m03
+
+## Configuration Reference — stellario.yaml
+
+### Schema
+
+```yaml
+memoryDir: ".stellario"          # Required: memory data directory (relative to project root)
+
+volumes:                          # Required: volume definitions
+  <name>:
+    profile: mutable | append | scratch | frozen | workspace
+    boundaries:
+      write: [<agent>, ...] | [all]
+      read: [<agent>, ...] | [all]
+    authority?: source | curated | synthesized
+    idPrefix?: string             # custom ID prefix (default: first char of name)
+    requiredTagPrefix?: string    # enforce tag prefix on all entries
+
+agents:                           # Required: agent definitions
+  <name>:
+    display: string               # human-readable name
+    role?: primary | subagent     # default: subagent
+
+tags:                             # Optional: tag vocabulary
+  namespaces?: [string, ...]     # allowed tag namespaces
+  typeValues?: [string, ...]     # closed vocabulary for type:* tags
+```
+
+### Config Discovery
+
+loadConfig() searches in order:
+1. .opencode/stellario.yaml (preferred)
+2. stellario.yaml (project root)
+
+### Provided Templates
+
+- minimal.yaml — Single agent, 4 volumes (active, handover, drafting, workspace)
+- novel.yaml — Multi-agent fiction writing: 8 volumes, 5 agents (stellario, chronicler, worldbuilder, penna, vilicus)
+- software.yaml — Multi-agent software dev: 6 volumes, 3 agents (stellario, analyst, executor)
+
+### This Project's Config
+
+Stellario uses its own software template at .opencode/stellario.yaml:
+- 6 volumes: meta, active, handover, layer, drafting, archived
+- 3 agents: stellario (primary), analyst (subagent), executor (subagent)
+- Tag namespaces: module, feature, crate, file, type
+- Type values: handoff, design, adr, convention, layer, polish, bug, investigation
+
+tags: ``
+author: stellario
+
+---
