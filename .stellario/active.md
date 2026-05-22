@@ -100,3 +100,35 @@ tags: ``
 author: stellario
 
 ---
+
+## a03
+
+## Known Issues and Conventions
+
+### Known Issues
+
+1. History tool returns placeholder text: "git history lookup - see Lilac implementation for full detail". The git log parsing for per-entry revision history is not yet implemented.
+
+2. canWrite permission check has a subtle bug: it checks `!behavior.canRevise && !canCreate(volume, config)` which means append volumes (canRevise=false, canCreate=true) pass, but the logic is confusing. Write boundary check should be clearer.
+
+3. Tag and keyword arrays may not be correctly passed through the opencode tool interface. During self-boost testing, tags and keywords parameters caused "keywords.map is not a function" errors, suggesting the tool invocation layer may serialize arrays as non-array types.
+
+### Code Conventions
+
+- File naming: kebab-case (e.g., memory-defs.ts, telescope-defs.ts)
+- Type exports: all types in types.ts, imported by other modules
+- Error messages: Use unicode symbols (✅, ❌, ⚠) in tool output
+- Comment style: Section dividers with // ═══ headers
+- Module pattern: each file is self-contained, imports from sibling modules
+- Zod schemas: defined inline in tool definitions (defs/)
+- No tests yet: project relies on manual testing and dogfooding
+
+### Tag Vocabulary (software template)
+
+Namespaces: module, feature, crate, file, type
+Type values: handoff, design, adr, convention, layer, polish, bug, investigation
+
+tags: ``
+author: stellario
+
+---
