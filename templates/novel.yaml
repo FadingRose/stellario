@@ -1,7 +1,7 @@
 # Stellario — Novel Writing Config
 # 8 volumes, 5 agents
 
-memoryDir: ".writer-memory"
+memoryDir: ".opencode/.writer-memory"
 
 volumes:
   meta:

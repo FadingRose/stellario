@@ -89,7 +89,7 @@ export interface EmbeddingConfig {
 }
 
 export interface StellarioConfig {
-  /** Directory for JSONL data, relative to project root. Default: ".stellario" */
+  /** Directory for JSONL data, relative to project root. Default: ".opencode/.stellario" */
   memoryDir?: string
   /** Volume definitions. Key = volume name. */
   volumes: Record<string, VolumeDef>

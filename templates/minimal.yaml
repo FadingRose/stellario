@@ -1,7 +1,7 @@
 # Stellario — Minimal Config
 # For simple projects with a single agent
 
-memoryDir: ".stellario"
+memoryDir: ".opencode/.stellario"
 
 volumes:
   active:

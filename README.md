@@ -32,7 +32,7 @@ stellario.yaml          ← you define volumes, agents, permissions
 └─────────────────┘
         │
         ▼
-  .opencode/memory/      ← runtime data (JSONL + git)
+  .opencode/.stellario/   ← runtime data (JSONL + git)
     volumes.jsonl
     active.jsonl
     drafting.jsonl
@@ -55,7 +55,7 @@ This scaffolds everything inside `.opencode/` — config, tools, agents, plugin,
 Edit `.opencode/stellario.yaml`:
 
 ```yaml
-memoryDir: ".stellario"
+memoryDir: ".opencode/.stellario"
 
 volumes:
   active:
@@ -191,7 +191,7 @@ Prefix defaults to the first character of the volume name, overridable via `idPr
 
 ```yaml
 # Required: memory data directory (relative to project root)
-memoryDir: ".stellario"
+memoryDir: ".opencode/.stellario"
 
 # Required: volume definitions
 volumes:

@@ -1,7 +1,7 @@
 # Stellario — Software Development Config
 # 6 volumes, 3 agents
 
-memoryDir: ".stellario"
+memoryDir: ".opencode/.stellario"
 
 volumes:
   meta:

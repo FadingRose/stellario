@@ -118,7 +118,7 @@ function validateConfig(raw: any, sourcePath: string): StellarioConfig {
   }
 
   return {
-    memoryDir: raw.memoryDir || ".stellario",
+    memoryDir: raw.memoryDir || ".opencode/.stellario",
     volumes,
     agents,
     tags: raw.tags,
@@ -173,5 +173,5 @@ export function getVolumeIdPrefix(config: StellarioConfig, volume: string): stri
  * Resolve memory directory path (absolute).
  */
 export function getMemoryDir(config: StellarioConfig, projectRoot: string): string {
-  return join(projectRoot, config.memoryDir || ".stellario")
+  return join(projectRoot, config.memoryDir || ".opencode/.stellario")
 }

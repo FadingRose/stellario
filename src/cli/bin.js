@@ -140,7 +140,7 @@ const volumes = config.volumes || {}
 
 // ── 3. Memory directory + git init ─────────────────────────────────────────
 
-const memDir = join(opencodeDir, "memory")
+const memDir = join(projectRoot, config.memoryDir || ".opencode/.stellario")
 if (!existsSync(memDir)) {
   mkdirSync(memDir, { recursive: true })
   console.log(`✓ Memory dir: ${memDir}`)
