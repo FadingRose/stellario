@@ -6,6 +6,7 @@ import {
 } from "fs"
 import { randomUUID } from "crypto"
 import { join } from "path"
+import { z } from "zod"
 import type { StellarioConfig, MemoryEntry, VolumeIndexEntry } from "./types.js"
 import { profileBehavior } from "./types.js"
 import { getMemoryDir, getVolumeIdPrefix, getTrackedVolumes } from "./config.js"
@@ -58,18 +59,38 @@ export function ensureStringArray(value: unknown): string[] {
 /**
  * Safely coerce a tool argument to an array of any type.
  * opencode may pass array params as JSON strings instead of actual arrays.
+ * After parsing, validates each element against an optional Zod schema.
  */
-export function ensureArray<T>(value: unknown): T[] {
-  if (Array.isArray(value)) return value
-  if (typeof value === "string") {
+export function ensureArray<T>(value: unknown, elementSchema?: z.ZodType<T>): T[] {
+  let arr: unknown[]
+  if (Array.isArray(value)) {
+    arr = value
+  } else if (typeof value === "string") {
     try {
       const parsed = JSON.parse(value)
-      if (Array.isArray(parsed)) return parsed
+      if (Array.isArray(parsed)) {
+        arr = parsed
+      } else {
+        return []
+      }
     } catch {
-      // Not valid JSON — treat as empty
+      return []
+    }
+  } else {
+    return []
+  }
+
+  if (!elementSchema) return arr as T[]
+
+  // Validate each element with Zod, filter out invalid
+  const result: T[] = []
+  for (const item of arr) {
+    const parsed = elementSchema.safeParse(item)
+    if (parsed.success) {
+      result.push(parsed.data)
     }
   }
-  return []
+  return result
 }
 
 export function dedupeTags(tags: string[]): string[] {
@@ -318,7 +339,7 @@ export function findEntry(
     const entries = readJsonl(memDir, vol)
     const found = entries.find((e) => e.id === id)
     if (found) {
-      return { entry: found, volume: found.volume || vol }
+      return { entry: found, volume: vol }
     }
   }
   return null

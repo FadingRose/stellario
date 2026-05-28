@@ -210,9 +210,18 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
     async execute(args, context: ToolContext) {
       if (!args.id) return "\u274c revise requires 'id'."
 
-      // Defensive: opencode may pass arrays as JSON strings
-      const edits = ensureArray<{ range: string; content: string }>(args.edits)
-      const refs_add = ensureArray<{ target: string; reason: string }>(args.refs_add)
+      // Defensive: opencode may pass arrays as JSON strings or with broken element shapes.
+      // Validate each element with Zod to guarantee correct types before use.
+      const editSchema = z.object({ range: z.string(), content: z.string() })
+      const edits = ensureArray(args.edits, editSchema)
+      if (args.edits && !edits.length) {
+        return `\u274c 'edits' was provided but all elements failed validation. Each edit needs 'range' (string) and 'content' (string). Raw input: ${JSON.stringify(args.edits).slice(0, 200)}`
+      }
+      const refSchema = z.object({ target: z.string(), reason: z.string() })
+      const refs_add = ensureArray(args.refs_add, refSchema)
+      if (args.refs_add && !refs_add.length) {
+        return `\u274c 'refs_add' was provided but all elements failed validation. Each ref needs 'target' (string) and 'reason' (string). Raw input: ${JSON.stringify(args.refs_add).slice(0, 200)}`
+      }
       const refs_remove = ensureStringArray(args.refs_remove)
 
       const hasMutation = edits.length || refs_add.length || refs_remove.length
