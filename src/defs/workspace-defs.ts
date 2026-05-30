@@ -125,7 +125,7 @@ export function buildStatus(projectRoot: string, agentName: string): string {
         const group = activeTasks.filter(t => t.status === status)
         for (const task of group) {
           const owner = task.owner || "\u2014"
-          const paths = task.paths.length > 0 ? `  ${task.paths.join(", ")}` : ""
+          const paths = (task.paths?.length ?? 0) > 0 ? `  ${task.paths.join(", ")}` : ""
           lines.push(`  [${task.id}] ${status.padEnd(12)} ${owner.padEnd(14)} ${task.title}`)
           if (paths) lines.push(`    ${paths}`)
         }

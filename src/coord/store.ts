@@ -224,9 +224,9 @@ export function updateTaskStatus(
   }
 
   // Check dependencies: can't start if dependencies aren't done
-  if (newStatus === "in_progress" && task.depends_on.length > 0) {
+  if (newStatus === "in_progress" && (task.depends_on?.length ?? 0) > 0) {
     const allDeps = readTasks(memDir)
-    for (const depId of task.depends_on) {
+    for (const depId of task.depends_on!) {
       const dep = allDeps.find(t => t.id === depId)
       if (dep && dep.status !== "done") {
         throw new Error(

@@ -73,9 +73,9 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
 
         // Optionally lock paths
         let lockResults = ""
-        if (args.lock_paths && task.paths.length > 0) {
+        if (args.lock_paths && (task.paths?.length ?? 0) > 0) {
           const results: string[] = []
-          for (const path of task.paths) {
+          for (const path of task.paths!) {
             const conflict = lockPath(ctx.memDir, path, agent, task.id)
             if (conflict) {
               results.push(`  \u274c ${path} — locked by ${conflict.agent}`)
@@ -90,9 +90,9 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
           `Created [${task.id}] "${task.title}"`,
           `Status: ${task.status}${task.owner ? ` (owner: ${task.owner})` : ""}`,
           `Author: ${task.author}`,
-          task.paths.length > 0 ? `Paths: ${task.paths.join(", ")}` : null,
-          task.depends_on.length > 0 ? `Depends: ${task.depends_on.join(", ")}` : null,
-          task.tags.length > 0 ? `Tags: ${task.tags.join(", ")}` : null,
+          (task.paths?.length ?? 0) > 0 ? `Paths: ${task.paths.join(", ")}` : null,
+          (task.depends_on?.length ?? 0) > 0 ? `Depends: ${task.depends_on.join(", ")}` : null,
+          (task.tags?.length ?? 0) > 0 ? `Tags: ${task.tags.join(", ")}` : null,
           lockResults || null,
         ].filter(Boolean).join("\n")
       } catch (err: any) {
@@ -123,9 +123,9 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
 
         const shouldLock = args.lock_paths !== false
         let lockResults = ""
-        if (shouldLock && task.paths.length > 0) {
+        if (shouldLock && (task.paths?.length ?? 0) > 0) {
           const results: string[] = []
-          for (const path of task.paths) {
+          for (const path of task.paths!) {
             const conflict = lockPath(ctx.memDir, path, agent, task.id)
             if (conflict) {
               results.push(`  \u274c ${path} — locked by ${conflict.agent}`)
@@ -323,12 +323,12 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
           for (const task of group) {
             const icon = statusIcon[task.status] || "\u2022"
             const owner = task.owner || "\u2014"
-            const paths = task.paths.length > 0
+            const paths = (task.paths?.length ?? 0) > 0
               ? `  [${task.paths.join(", ")}]`
               : ""
             lines.push(`  ${icon} [${task.id}] ${task.status.padEnd(12)} ${owner.padEnd(14)} ${task.title}`)
             if (paths) lines.push(`    ${paths}`)
-            if (task.depends_on.length > 0) {
+            if ((task.depends_on?.length ?? 0) > 0) {
               lines.push(`    depends: ${task.depends_on.join(", ")}`)
             }
           }
