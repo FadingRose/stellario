@@ -276,8 +276,8 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         }
 
         for (const edit of parsedEdits) {
-          const replacementLines = edit.content.split("\n")
-          lines.splice(edit.start, edit.end - edit.start + 1, ...replacementLines)
+          const replacementLines = edit.content === "" ? [] : edit.content.split("\n")
+          lines.splice(edit.start - 1, edit.end - edit.start + 1, ...replacementLines)
         }
 
         newContent = lines.join("\n")
