@@ -13,11 +13,15 @@
     "./defs/memory": "./src/defs/memory-defs.ts",
     "./defs/telescope": "./src/defs/telescope-defs.ts",
     "./defs/workspace": "./src/defs/workspace-defs.ts",
+    "./defs/coordination": "./src/defs/coordination-defs.ts",
     "./config": "./src/config.ts",
     "./store": "./src/store.ts",
     "./permissions": "./src/permissions.ts",
     "./types": "./src/types.ts",
-    "./embedding": "./src/embedding.ts"
+    "./embedding": "./src/embedding.ts",
+    "./coord/types": "./src/coord/types.ts",
+    "./coord/lock": "./src/coord/lock.ts",
+    "./coord/store": "./src/coord/store.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.0.0",

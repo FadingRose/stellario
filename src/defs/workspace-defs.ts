@@ -3,6 +3,8 @@ import { resolveContext } from "../context.js"
 import { resolveAgent } from "../permissions.js"
 import { readJsonl, readVolumeIndex, extractTitle, findEntry, getActiveWorkspace } from "../store.js"
 import { loadConfig, getMemoryDir, getWorkspaceVolume } from "../config.js"
+import { queryTasks } from "../coord/store.js"
+import { getAllActiveLocks } from "../coord/lock.js"
 import { existsSync, readFileSync } from "fs"
 import { join } from "path"
 
@@ -106,6 +108,40 @@ export function buildStatus(projectRoot: string, agentName: string): string {
     }
   }
 
+  // ── Taskboard ──
+  const activeTasks = queryTasks(memDir, {
+    status: ["open", "claimed", "in_progress", "review"],
+  })
+  const activeLocks = getAllActiveLocks(memDir)
+
+  if (activeTasks.length > 0 || activeLocks.length > 0) {
+    lines.push("")
+    lines.push("\u2500\u2500\u2500")
+    lines.push("Taskboard:")
+
+    if (activeTasks.length > 0) {
+      const statusOrder = ["in_progress", "claimed", "open", "review"] as const
+      for (const status of statusOrder) {
+        const group = activeTasks.filter(t => t.status === status)
+        for (const task of group) {
+          const owner = task.owner || "\u2014"
+          const paths = task.paths.length > 0 ? `  ${task.paths.join(", ")}` : ""
+          lines.push(`  [${task.id}] ${status.padEnd(12)} ${owner.padEnd(14)} ${task.title}`)
+          if (paths) lines.push(`    ${paths}`)
+        }
+      }
+    }
+
+    if (activeLocks.length > 0) {
+      lines.push("")
+      for (const lock of activeLocks) {
+        const age = formatLockAge(lock.acquired)
+        const taskRef = lock.task_id ? ` \u2192 ${lock.task_id}` : ""
+        lines.push(`  \U0001f512 ${lock.path} (${lock.agent}, ${age})${taskRef}`)
+      }
+    }
+  }
+
   // ── Dynamic prompt injection (type:prompt entries in meta) ──
   const metaVol = findMetaVolume(config)
   if (metaVol) {
@@ -160,4 +196,19 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
   }
 
   return { status }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+function formatLockAge(isoTimestamp: string): string {
+  const acquired = new Date(isoTimestamp).getTime()
+  const diffMs = Date.now() - acquired
+  const minutes = Math.floor(diffMs / 60_000)
+  if (minutes < 1) return "just now"
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  const remMin = minutes % 60
+  return remMin > 0 ? `${hours}h ${remMin}m ago` : `${hours}h ago`
 }
