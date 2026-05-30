@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-30
+
+### Added
+
+- **Coordination layer for multi-agent sync.** New `src/coord/` module providing task board and file-level mutual exclusion, enabling multiple agents to work on the same codebase without merge conflicts ([`fdaf674`](https://github.com/FadingRose/stellario/commit/fdaf674)).
+- `src/coord/types.ts` — Task lifecycle state machine (`open→claimed→in_progress→review→done`), FileLock with TTL, valid transition table.
+- `src/coord/lock.ts` — Two-layer locking: advisory file lock (mkdir-atomic) for inter-process mutex on `.coord/`, plus path lock map (`locks.json`) for project file exclusions. Stale lock eviction, TTL-based auto-release.
+- `src/coord/store.ts` — Task CRUD with state machine enforcement, dependency validation (can't start if deps aren't done), authorization checks (only owner can transition claimed tasks).
+- `src/defs/coordination-defs.ts` — 7 new tool definitions:
+  - `taskboard_plan` — create task + optional path locks
+  - `taskboard_claim` — claim open task + auto-lock paths
+  - `taskboard_update` — status transitions with validation
+  - `taskboard_complete` — mark done + release locks
+  - `taskboard_board` — view tasks + active locks
+  - `taskboard_lock` — explicit file path locking
+  - `taskboard_unlock` — release locks (specific paths or all)
+- `buildStatus()` now includes a Taskboard section showing active tasks and file locks in the workspace dashboard.
+- Export paths: `stellario/defs/coordination`, `stellario/coord/types`, `stellario/coord/lock`, `stellario/coord/store`.
+
+### Design
+
+- Task = intent declaration (communication protocol between agents).
+- Lock = file-level mutual exclusion (enforcement mechanism).
+- These are orthogonal: tasks can exist without locks, locks can exist without tasks.
+- Default lock TTL: 60 minutes. Advisory lock stale timeout: 2 minutes.
+- Task IDs use `tb` prefix (e.g., `tb01`, `tb02`).
+
 ## [0.4.0] - 2026-05-23
 
 ### Added
@@ -79,7 +106,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Telescope tool: unified search with text matching, tag filtering (`AND`/`OR`/`NOT`), and keyword enumeration modes.
 - Documentation: README, API reference, configuration guide, concepts guide.
 
-[Unreleased]: https://github.com/FadingRose/stellario/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/FadingRose/stellario/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/FadingRose/stellario/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/FadingRose/stellario/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/FadingRose/stellario/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/FadingRose/stellario/compare/v0.1.0...v0.2.0
