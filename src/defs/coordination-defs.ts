@@ -14,6 +14,7 @@ import { z } from "zod"
 import type { ToolContext, ToolDef } from "../types.js"
 import { resolveContext } from "../context.js"
 import { resolveAgent } from "../permissions.js"
+import { ensureStringArray } from "../store.js"
 import { createTask, findTask, queryTasks, claimTask, updateTaskStatus, updateTaskMeta } from "../coord/store.js"
 import {
   lockPath,
@@ -54,15 +55,20 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
       const agent = resolveAgent(context.agent, ctx.config)
       if (!agent) return `\u274c Unknown agent: "${context.agent}"`
 
+      // Defensive: opencode may pass arrays as JSON strings
+      const paths = ensureStringArray(args.paths)
+      const depends_on = ensureStringArray(args.depends_on)
+      const tags = ensureStringArray(args.tags)
+
       try {
         const task = createTask(ctx.memDir, {
           title: args.title.trim(),
           body: args.body,
           author: agent,
           owner: args.owner,
-          paths: args.paths || [],
-          depends_on: args.depends_on,
-          tags: args.tags,
+          paths,
+          depends_on,
+          tags,
         })
 
         // Optionally lock paths
@@ -163,6 +169,10 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
       const agent = resolveAgent(context.agent, ctx.config)
       if (!agent) return `\u274c Unknown agent: "${context.agent}"`
 
+      // Defensive: opencode may pass arrays as JSON strings
+      const paths = ensureStringArray(args.paths)
+      const tags = ensureStringArray(args.tags)
+
       try {
         // Status update
         if (args.status) {
@@ -171,13 +181,13 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
         }
 
         // Metadata update
-        const hasMeta = args.title || args.body || args.paths || args.tags
+        const hasMeta = args.title || args.body || paths.length > 0 || tags.length > 0
         if (hasMeta) {
           const task = updateTaskMeta(ctx.memDir, args.id, agent, {
             title: args.title,
             body: args.body,
-            paths: args.paths,
-            tags: args.tags,
+            paths: paths.length > 0 ? paths : undefined,
+            tags: tags.length > 0 ? tags : undefined,
           })
           return `Updated [${task.id}] metadata`
         }
@@ -250,13 +260,26 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
       const agent = resolveAgent(context.agent, ctx.config)
       if (!agent) return `\u274c Unknown agent: "${context.agent}"`
 
+      // Defensive: opencode may pass arrays as JSON strings
+      const queryTags = ensureStringArray(args.tags)
+
       // Parse status filter
       let statusFilter: TaskStatus | TaskStatus[] | undefined
       if (args.status) {
         if (Array.isArray(args.status)) {
           statusFilter = args.status as TaskStatus[]
-        } else {
-          statusFilter = args.status as TaskStatus
+        } else if (typeof args.status === "string") {
+          // May also be a JSON string like '["open","claimed"]'
+          try {
+            const parsed = JSON.parse(args.status)
+            if (Array.isArray(parsed)) {
+              statusFilter = parsed as TaskStatus[]
+            } else {
+              statusFilter = args.status as TaskStatus
+            }
+          } catch {
+            statusFilter = args.status as TaskStatus
+          }
         }
       }
 
@@ -264,7 +287,7 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
         status: statusFilter,
         owner: args.owner,
         author: args.author,
-        tags: args.tags,
+        tags: queryTags,
       })
 
       const lines: string[] = []
@@ -345,16 +368,17 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
       ttl_minutes: z.number().optional().describe("Lock TTL in minutes. Default: 60."),
     },
     async execute(args, context: ToolContext) {
-      if (!args.paths || args.paths.length === 0) return "\u274c paths is required."
-
       const ctx = resolveContext(context)
       const agent = resolveAgent(context.agent, ctx.config)
       if (!agent) return `\u274c Unknown agent: "${context.agent}"`
 
+      const paths = ensureStringArray(args.paths)
+      if (paths.length === 0) return "\u274c paths is required."
+
       const results: string[] = []
       let allOk = true
 
-      for (const path of args.paths) {
+      for (const path of paths) {
         const conflict = lockPath(ctx.memDir, path, agent, args.task_id, args.ttl_minutes)
         if (conflict) {
           results.push(`\u274c ${path} — locked by ${conflict.agent} (since ${formatAge(conflict.acquired)})`)
@@ -365,7 +389,7 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
       }
 
       const header = allOk
-        ? `Locked ${args.paths.length} path(s) for ${agent}`
+        ? `Locked ${paths.length} path(s) for ${agent}`
         : `Locked with conflicts:`
       return `${header}\n${results.join("\n")}`
     },
@@ -386,7 +410,9 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
       const agent = resolveAgent(context.agent, ctx.config)
       if (!agent) return `\u274c Unknown agent: "${context.agent}"`
 
-      if (args.release_all || (!args.paths || args.paths.length === 0)) {
+      const paths = ensureStringArray(args.paths)
+
+      if (args.release_all || paths.length === 0) {
         // Release all locks
         const unlocked = unlockAllByAgent(ctx.memDir, agent)
         if (unlocked.length === 0) return "No locks held by you."
@@ -395,7 +421,7 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
 
       // Release specific paths
       const results: string[] = []
-      for (const path of args.paths!) {
+      for (const path of paths) {
         const ok = unlockPath(ctx.memDir, path, agent)
         results.push(ok ? `\u2705 ${path}` : `\u274c ${path} — not held by you or not locked`)
       }
