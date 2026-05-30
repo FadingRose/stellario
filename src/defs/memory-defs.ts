@@ -192,20 +192,24 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
 
   const revise: ToolDef = {
     description:
-      "Edit a memory entry: modify content lines and/or manage refs. " +
-      "Content edits use line ranges. Changes are committed to git automatically.",
+      "Edit a memory entry's content lines and/or refs. " +
+      "Only the entry's author can revise. Append-only volumes disallow revision. " +
+      "Line numbers come from memory_show output (1-indexed, left of the '|' separator). " +
+      "Each edit replaces the specified line range with new content. " +
+      "Multiple edits are applied back-to-front (highest line first) to avoid offset drift. " +
+      "Changes are committed to git automatically.",
     args: {
-      id: z.string().describe("Entry ID to edit."),
+      id: z.string().describe("Entry ID to revise (must be your own entry)."),
       edits: z.array(z.object({
-        range: z.string().describe("Line range: '43' or '43-54'."),
-        content: z.string().describe("Replacement text."),
-      })).optional().describe("Content edits, applied back-to-front."),
+        range: z.string().describe("1-indexed line range from memory_show output. Single line: '43'. Span: '43-54'. Replaces those lines with 'content'."),
+        content: z.string().describe("Replacement text for the specified range. Use empty string to delete lines."),
+      })).optional().describe("Line-level content edits. Multiple edits are processed highest-line-first to preserve line numbers."),
       refs_add: z.array(z.object({
-        target: z.string().describe("Target entry ID."),
-        reason: z.string().describe("Why this entry references the target."),
-      })).optional().describe("Refs to add."),
-      refs_remove: z.array(z.string()).optional().describe("Entry IDs to remove from refs."),
-      message: z.string().describe("Why this edit was made."),
+        target: z.string().describe("Entry ID to reference."),
+        reason: z.string().describe("Short explanation of the relationship."),
+      })).optional().describe("Cross-references to add to this entry."),
+      refs_remove: z.array(z.string()).optional().describe("Entry IDs whose refs should be removed from this entry."),
+      message: z.string().describe("Commit message describing why this revision was made."),
     },
     async execute(args, context: ToolContext) {
       if (!args.id) return "\u274c revise requires 'id'."
