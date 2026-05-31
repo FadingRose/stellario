@@ -1,15 +1,12 @@
 import { z } from "zod"
-import type { StellarioConfig, MemoryEntry, MemoryRef, ToolContext, ToolDef } from "../types.js"
-import { profileBehavior } from "../types.js"
+import type { StellarioConfig, MemoryEntry, ToolContext, ToolDef } from "../types.js"
 import { resolveContext, type ResolvedContext } from "../context.js"
-import { resolveAgent, canRead, canWrite, canRevise, canForget, isAuthor } from "../permissions.js"
+import { resolveAgent, canRead, canWrite, canRevise, canForget, isAuthor, writableVolumes } from "../permissions.js"
 import {
   readJsonl, writeEntries, generateNextId, findEntry,
-  setActiveWorkspace, getActiveWorkspace,
   today, truncate, extractTitle, dedupeTags, ensureStringArray, ensureArray,
 } from "../store.js"
 import { gitCommit } from "../git.js"
-import { getWorkspaceVolume } from "../config.js"
 import { updateEntryIndex, removeEntryIndex } from "../embedding.js"
 
 // =============================================================================
@@ -43,8 +40,21 @@ function formatContent(content: string): string {
   return lines.map((line, i) => `${String(i + 1).padStart(padWidth)}| ${line}`).join("\n")
 }
 
-function formatRefs(refs: MemoryRef[]): string {
-  return refs.map(r => `  \u2192 ${r.target} \u2014 ${r.reason}`).join("\n")
+/**
+ * Find the default volume for an agent: first writable mutable (non-workspace) volume.
+ */
+function resolveDefaultVolume(agent: string, config: StellarioConfig): string | null {
+  const writable = writableVolumes(agent, config)
+  for (const name of writable) {
+    const def = config.volumes[name]
+    if (def.profile === "mutable") return name
+  }
+  // Fallback: first writable that accepts creates
+  for (const name of writable) {
+    const def = config.volumes[name]
+    if (def.profile !== "frozen") return name
+  }
+  return null
 }
 
 // =============================================================================
@@ -54,46 +64,52 @@ function formatRefs(refs: MemoryRef[]): string {
 export function getMemoryToolDefs(): Record<string, ToolDef> {
   const create: ToolDef = {
     description:
-      "Create a memory entry in a specified volume. " +
-      "Volume determines storage location; permissions are auto-checked. " +
-      "Author is auto-filled from agent identity.",
+      "Create a memory entry. " +
+      "Author is auto-filled from agent identity. " +
+      "Volume is optional — defaults to your primary mutable volume.",
     args: {
-      volume: z.string().describe("Target volume name (as defined in stellario.yaml)."),
       content: z.string().describe("Entry text content."),
+      volume: z.string().optional().describe("Target volume name. Defaults to your primary mutable volume."),
       tags: z.array(z.string()).optional().describe("Tags in namespace:name format."),
       keywords: z.array(z.string()).optional().describe("2-5 free-form keywords for discovery."),
     },
     async execute(args, context: ToolContext) {
       if (!args.content?.trim()) return "\u274c content is required."
-      if (!args.volume) return "\u274c volume is required."
 
       const ctx = resolveContext(context)
       const agent = resolveAgent(context.agent, ctx.config)
       if (!agent) return `\u274c Unknown agent: "${context.agent}"`
 
-      const def = ctx.config.volumes[args.volume]
-      if (!def) return `\u274c Unknown volume: "${args.volume}". Available: ${Object.keys(ctx.config.volumes).join(", ")}`
+      // Resolve volume: explicit or default to first writable mutable volume
+      let volumeName = args.volume
+      if (!volumeName) {
+        volumeName = resolveDefaultVolume(agent, ctx.config)
+        if (!volumeName) return `\u274c No writable volume found for agent "${agent}". Specify 'volume' explicitly.`
+      }
 
-      if (!canWrite(agent, args.volume, ctx.config)) {
-        return `\u274c Agent "${agent}" cannot write to volume "${args.volume}".`
+      const def = ctx.config.volumes[volumeName]
+      if (!def) return `\u274c Unknown volume: "${volumeName}". Available: ${Object.keys(ctx.config.volumes).join(", ")}`
+
+      if (!canWrite(agent, volumeName, ctx.config)) {
+        return `\u274c Agent "${agent}" cannot write to volume "${volumeName}".`
       }
 
       let tags = dedupeTags(ensureStringArray(args.tags))
 
       if (def.requiredTagPrefix) {
         if (!tags.some(t => t.startsWith(def.requiredTagPrefix!))) {
-          return `\u274c Entries in "${args.volume}" must have a tag with prefix "${def.requiredTagPrefix}".`
+          return `\u274c Entries in "${volumeName}" must have a tag with prefix "${def.requiredTagPrefix}".`
         }
       }
 
       let keywords = ensureStringArray(args.keywords)
       keywords = [...new Set(keywords.map(k => k.trim()).filter(Boolean))]
 
-      const id = generateNextId(ctx.memDir, args.volume, ctx.config)
+      const id = generateNextId(ctx.memDir, volumeName, ctx.config)
 
       const entry: MemoryEntry = {
         id,
-        volume: args.volume,
+        volume: volumeName,
         content: args.content.trim(),
         tags,
         keywords,
@@ -102,11 +118,11 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         updated: today(),
       }
 
-      const entries = readJsonl(ctx.memDir, args.volume)
+      const entries = readJsonl(ctx.memDir, volumeName)
       entries.push(entry)
-      writeEntries(ctx.memDir, args.volume, entries, ctx.config)
+      writeEntries(ctx.memDir, volumeName, entries, ctx.config)
 
-      const commitHash = gitCommit(ctx.memDir, args.volume, `create: ${truncate(args.content, 50)}\n\nEntry: ${id}\nVolume: ${args.volume}\nAuthor: ${agent}`, ctx.config)
+      const commitHash = gitCommit(ctx.memDir, volumeName, `create: ${truncate(args.content, 50)}\n\nEntry: ${id}\nVolume: ${volumeName}\nAuthor: ${agent}`, ctx.config)
 
       // Update keyword index (async, non-blocking)
       if (keywords.length > 0) {
@@ -114,17 +130,11 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       }
 
       const lines = [
-        `Created [${id}] \u2192 ${args.volume}`,
+        `Created [${id}] → ${volumeName}`,
         `Author: ${agent}`,
         `Tags: ${tags.length > 0 ? tags.join(", ") : "(none)"}`,
         commitHash ? `Commit: ${commitHash}` : "(volume not version-controlled)",
       ]
-
-      const workspaceVol = getWorkspaceVolume(ctx.config)
-      if (workspaceVol === args.volume) {
-        lines.push("")
-        lines.push(`\uD83D\uDCA1 Use memory_show(id="${id}") to activate as current workspace`)
-      }
 
       return lines.join("\n")
     },
@@ -132,8 +142,7 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
 
   const show: ToolDef = {
     description:
-      "Read a memory entry by ID. Shows full content with line numbers, tags, and refs. " +
-      "For entries in the workspace volume, automatically activates as current context.",
+      "Read a memory entry by ID. Shows full content with line numbers, tags, and keywords.",
     args: {
       id: z.string().describe("Entry ID to read."),
     },
@@ -168,27 +177,13 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         lines.push(`keywords: ${entry.keywords.join(", ")}`)
       }
 
-      const refs = entry.refs || []
-      if (refs.length > 0) {
-        lines.push("")
-        lines.push(`refs (${refs.length}):`)
-        lines.push(formatRefs(refs))
-      }
-
-      const workspaceVol = getWorkspaceVolume(ctx.config)
-      if (workspaceVol && volume === workspaceVol) {
-        setActiveWorkspace(ctx.memDir, workspaceVol, args.id, agent)
-        lines.push("")
-        lines.push(`\u2713 Activated as current workspace`)
-      }
-
       return lines.join("\n")
     },
   }
 
   const revise: ToolDef = {
     description:
-      "Edit a memory entry's content lines and/or refs. " +
+      "Edit a memory entry's content. " +
       "Only the entry's author can revise. Append-only volumes disallow revision. " +
       "Line numbers come from memory_show output (1-indexed, left of the '|' separator). " +
       "Each edit uses 'from'/'to' to specify which lines to replace with 'content'. " +
@@ -202,11 +197,6 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         to: z.number().optional().describe("Last line number to replace (1-indexed, inclusive). Defaults to 'from' if omitted."),
         content: z.string().describe("Replacement text for the specified lines. Use empty string to delete lines."),
       })).optional().describe("Line-level content edits. Multiple edits are processed highest-line-first to preserve line numbers."),
-      refs_add: z.array(z.object({
-        target: z.string().describe("Entry ID to reference."),
-        reason: z.string().describe("Short explanation of the relationship."),
-      })).optional().describe("Cross-references to add to this entry."),
-      refs_remove: z.array(z.string()).optional().describe("Entry IDs whose refs should be removed from this entry."),
       message: z.string().describe("Commit message describing why this revision was made."),
     },
     async execute(args, context: ToolContext) {
@@ -219,15 +209,8 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       if (args.edits && !edits.length) {
         return `\u274c 'edits' was provided but all elements failed validation. Each edit needs 'from' (number) and 'content' (string). Raw input: ${JSON.stringify(args.edits).slice(0, 200)}`
       }
-      const refSchema = z.object({ target: z.string(), reason: z.string() })
-      const refs_add = ensureArray(args.refs_add, refSchema)
-      if (args.refs_add && !refs_add.length) {
-        return `\u274c 'refs_add' was provided but all elements failed validation. Each ref needs 'target' (string) and 'reason' (string). Raw input: ${JSON.stringify(args.refs_add).slice(0, 200)}`
-      }
-      const refs_remove = ensureStringArray(args.refs_remove)
 
-      const hasMutation = edits.length || refs_add.length || refs_remove.length
-      if (!hasMutation) return "\u274c revise requires at least one of: edits, refs_add, refs_remove."
+      if (!edits.length) return "\u274c revise requires 'edits'."
       if (!args.message) return "\u274c revise requires a 'message'."
 
       const ctx = resolveContext(context)
@@ -282,38 +265,9 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         changes.push(`content(${parsedEdits.map((e) => e.label).join(", ")})`)
       }
 
-      let newRefs: MemoryRef[] = [...(entry.refs || [])]
-
-      if (refs_remove.length > 0) {
-        const removeSet = new Set(refs_remove)
-        const before = newRefs.length
-        newRefs = newRefs.filter((r) => !removeSet.has(r.target))
-        const removed = before - newRefs.length
-        if (removed > 0) changes.push(`refs(-${removed})`)
-      }
-
-      if (refs_add.length > 0) {
-        for (const ref of refs_add) {
-          const target = findEntry(ctx.memDir, ref.target, ctx.config)
-          if (!target) return `\u274c Ref target "${ref.target}" not found.`
-          if (ref.target === args.id) return `\u274c Cannot self-reference.`
-        }
-        const existingTargets = new Set(newRefs.map((r) => r.target))
-        let added = 0
-        for (const ref of refs_add) {
-          if (!existingTargets.has(ref.target)) {
-            newRefs.push({ target: ref.target, reason: ref.reason })
-            existingTargets.add(ref.target)
-            added++
-          }
-        }
-        if (added > 0) changes.push(`refs(+${added})`)
-      }
-
       const updatedEntry: MemoryEntry = {
         ...entry,
         content: newContent,
-        refs: newRefs.length > 0 ? newRefs : undefined,
         updated: today(),
       }
       entries[entryIndex] = updatedEntry
