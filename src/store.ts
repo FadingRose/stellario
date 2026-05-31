@@ -141,26 +141,55 @@ function writeVolumeIndex(memDir: string, index: VolumeIndexEntry[]): void {
 // =============================================================================
 
 /**
- * Get the active workspace entry ID, or null.
+ * Get the active workspace entry ID for a specific agent, or null.
+ * Migrates legacy single-value active_workspace to per-agent map on first access.
  */
-export function getActiveWorkspace(memDir: string, workspaceVolume: string): string | null {
+export function getActiveWorkspace(memDir: string, workspaceVolume: string, agent?: string): string | null {
   const index = readVolumeIndex(memDir)
   const entry = index.find((e) => e.volume === workspaceVolume)
-  return entry?.active_workspace || null
+  if (!entry) return null
+
+  // Migrate legacy single-value to per-agent map
+  if (entry.active_workspace && !entry.active_workspaces) {
+    entry.active_workspaces = {}
+    // Don't know which agent owned it — store under "" as fallback
+    entry.active_workspaces[""] = entry.active_workspace
+    delete entry.active_workspace
+    writeVolumeIndex(memDir, index)
+  }
+
+  const map = entry.active_workspaces
+  if (!map) return null
+
+  if (agent && map[agent]) return map[agent]
+  // Fallback: try the agent key, then the legacy "" key
+  if (!agent) return map[""] || Object.values(map)[0] || null
+  return map[agent] || map[""] || null
 }
 
 /**
- * Set the active workspace entry ID.
+ * Set the active workspace entry ID for a specific agent.
  */
-export function setActiveWorkspace(memDir: string, workspaceVolume: string, id: string): void {
+export function setActiveWorkspace(memDir: string, workspaceVolume: string, id: string, agent?: string): void {
   let index = readVolumeIndex(memDir)
   let entry = index.find((e) => e.volume === workspaceVolume)
 
   if (!entry) {
-    entry = { volume: workspaceVolume, files: [`${workspaceVolume}.jsonl`], next_nonce: 1, active_workspace: id }
+    entry = {
+      volume: workspaceVolume,
+      files: [`${workspaceVolume}.jsonl`],
+      next_nonce: 1,
+      active_workspaces: { [agent || ""]: id },
+    }
     index.push(entry)
   } else {
-    entry.active_workspace = id
+    // Migrate legacy
+    if (entry.active_workspace && !entry.active_workspaces) {
+      entry.active_workspaces = { "": entry.active_workspace }
+      delete entry.active_workspace
+    }
+    if (!entry.active_workspaces) entry.active_workspaces = {}
+    entry.active_workspaces[agent || ""] = id
   }
 
   writeVolumeIndex(memDir, index)

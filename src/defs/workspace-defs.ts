@@ -71,7 +71,7 @@ export function buildStatus(projectRoot: string, agentName: string): string {
   // ── Active workspace ──
   const workspaceVol = getWorkspaceVolume(config)
   if (workspaceVol) {
-    const activeId = getActiveWorkspace(memDir, workspaceVol)
+    const activeId = getActiveWorkspace(memDir, workspaceVol, agentName)
     lines.push("")
     lines.push("\u2500\u2500\u2500")
 
@@ -93,14 +93,16 @@ export function buildStatus(projectRoot: string, agentName: string): string {
     }
   }
 
-  // ── Latest handover (append volumes) ──
+  // ── Latest handover (append volumes, filtered by agent) ──
   const appendVolumes = Object.entries(config.volumes)
     .filter(([, def]) => def.profile === "append")
     .map(([name]) => name)
 
   for (const appendVol of appendVolumes) {
     const entries = readJsonl(memDir, appendVol)
-    const latest = entries[entries.length - 1]
+    // Filter to entries authored by this agent, take the latest
+    const agentEntries = entries.filter(e => e.author === agentName)
+    const latest = agentEntries[agentEntries.length - 1]
     if (latest) {
       lines.push("")
       lines.push("\u2500\u2500\u2500")
@@ -260,7 +262,7 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
       entries.push(entry)
       writeEntries(ctx.memDir, workspaceVol, entries, ctx.config)
 
-      setActiveWorkspace(ctx.memDir, workspaceVol, id)
+      setActiveWorkspace(ctx.memDir, workspaceVol, id, agent)
 
       if (keywords.length > 0) {
         updateEntryIndex(ctx.memDir, id, keywords).catch(() => {})
@@ -303,8 +305,9 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
       // Resolve target ID
       let targetId = args.id
       if (!targetId) {
-        targetId = getActiveWorkspace(ctx.memDir, workspaceVol) || undefined
+        targetId = getActiveWorkspace(ctx.memDir, workspaceVol, agent) || undefined
       }
+
       if (!targetId) return "\u274c No active workspace. Use workspace_assemble to create one."
 
       const found = findEntry(ctx.memDir, targetId, ctx.config)
@@ -318,7 +321,7 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
 
       // Activate if in workspace volume
       if (found.volume === workspaceVol) {
-        setActiveWorkspace(ctx.memDir, workspaceVol, entry.id)
+        setActiveWorkspace(ctx.memDir, workspaceVol, entry.id, agent)
       }
 
       // Build output
@@ -386,7 +389,7 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
 
       let targetId = args.id
       if (!targetId) {
-        targetId = getActiveWorkspace(ctx.memDir, workspaceVol) || undefined
+        targetId = getActiveWorkspace(ctx.memDir, workspaceVol, agent) || undefined
       }
       if (!targetId) return "\u274c No active workspace."
       if (!args.message) return "\u274c edit requires a 'message'."
@@ -454,7 +457,7 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
 
       let targetId = args.id
       if (!targetId) {
-        targetId = getActiveWorkspace(ctx.memDir, workspaceVol) || undefined
+        targetId = getActiveWorkspace(ctx.memDir, workspaceVol, agent) || undefined
       }
       if (!targetId) return "\u274c No active workspace. Use workspace_assemble to create one."
 
@@ -526,7 +529,7 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
 
       let targetId = args.id
       if (!targetId) {
-        targetId = getActiveWorkspace(ctx.memDir, workspaceVol) || undefined
+        targetId = getActiveWorkspace(ctx.memDir, workspaceVol, agent) || undefined
       }
       if (!targetId) return "\u274c No active workspace."
 

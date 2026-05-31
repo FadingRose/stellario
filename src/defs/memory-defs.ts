@@ -177,7 +177,7 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
 
       const workspaceVol = getWorkspaceVolume(ctx.config)
       if (workspaceVol && volume === workspaceVol) {
-        setActiveWorkspace(ctx.memDir, workspaceVol, args.id)
+        setActiveWorkspace(ctx.memDir, workspaceVol, args.id, agent)
         lines.push("")
         lines.push(`\u2713 Activated as current workspace`)
       }

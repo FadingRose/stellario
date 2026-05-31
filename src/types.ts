@@ -128,7 +128,8 @@ export interface VolumeIndexEntry {
   volume: string
   files: string[]        // ordered list of JSONL files
   next_nonce: number     // next available nonce for ID generation
-  active_workspace?: string  // only for workspace profile: currently active entry ID
+  active_workspace?: string              // legacy: single global active entry (migrated to map on read)
+  active_workspaces?: Record<string, string>  // per-agent: { agentName: entryId }
 }
 
 // ─── Tool Context ───────────────────────────────────────────────────────────
