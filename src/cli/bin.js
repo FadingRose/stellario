@@ -26,6 +26,7 @@ export const show    = tool(defs.show)
 export const revise  = tool(defs.revise)
 export const forget  = tool(defs.forget)
 export const history = tool(defs.history)
+export const meta    = tool(defs.meta)
 `
 
 const TELESCOPE_GLUE = `import { tool } from "@opencode-ai/plugin"
@@ -229,7 +230,7 @@ writeGlue(pluginDir, "stellario-inject.ts", INJECTOR_PLUGIN)
 const agentsDir = join(opencodeDir, "agents")
 mkdirSync(agentsDir, { recursive: true })
 
-const memoryTools = ["stellario-memory_create", "stellario-memory_show", "stellario-memory_revise", "stellario-memory_forget", "stellario-memory_history"]
+const memoryTools = ["stellario-memory_create", "stellario-memory_show", "stellario-memory_revise", "stellario-memory_forget", "stellario-memory_history", "stellario-memory_meta"]
 const searchTools = ["stellario-telescope_search"]
 const workspaceTools = ["stellario-workspace_status", "stellario-workspace_assemble", "stellario-workspace_open", "stellario-workspace_edit", "stellario-workspace_add", "stellario-workspace_remove"]
 
