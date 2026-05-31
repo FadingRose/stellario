@@ -41,7 +41,12 @@ import { getWorkspaceToolDefs } from "stellario/defs/workspace"
 
 const defs = getWorkspaceToolDefs()
 
-export const status = tool(defs.status)
+export const status   = tool(defs.status)
+export const assemble = tool(defs.assemble)
+export const open     = tool(defs.open)
+export const edit     = tool(defs.edit)
+export const add      = tool(defs.add)
+export const remove   = tool(defs.remove)
 `
 
 const INJECTOR_PLUGIN = `import type { Plugin } from "@opencode-ai/plugin"
@@ -226,7 +231,7 @@ mkdirSync(agentsDir, { recursive: true })
 
 const memoryTools = ["stellario-memory_create", "stellario-memory_show", "stellario-memory_revise", "stellario-memory_forget", "stellario-memory_history"]
 const searchTools = ["stellario-telescope_search"]
-const workspaceTools = ["stellario-workspace_status"]
+const workspaceTools = ["stellario-workspace_status", "stellario-workspace_assemble", "stellario-workspace_open", "stellario-workspace_edit", "stellario-workspace_add", "stellario-workspace_remove"]
 
 for (const agent of agents) {
   const agentPath = join(agentsDir, `${agent}.md`)

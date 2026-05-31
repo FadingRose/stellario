@@ -514,12 +514,12 @@ const { create, show, revise, forget, history } = createMemoryTools()
 | Arg | Type | Required | Description |
 |-----|------|----------|-------------|
 | `id` | `string` | ✓ | Entry ID to edit |
-| `edits` | `{ range: string, content: string }[]` | — | Content edits (line ranges, applied back-to-front) |
+| `edits` | `{ from: number, to?: number, content: string }[]` | — | Content edits (line ranges, applied back-to-front) |
 | `refs_add` | `{ target: string, reason: string }[]` | — | Refs to add |
 | `refs_remove` | `string[]` | — | Target IDs to remove from refs |
 | `message` | `string` | ✓ | Why this edit was made |
 
-`range` format: `"43"` (single line) or `"43-54"` (inclusive range).
+`from`/`to` format: `from` is the first line to replace (1-indexed), `to` is the last (inclusive, defaults to `from`). Use `content: ""` to delete lines.
 
 #### `forget` args
 
@@ -536,15 +536,59 @@ const { create, show, revise, forget, history } = createMemoryTools()
 
 ### `createWorkspaceTools()`
 
-Returns 1 opencode tool instance:
+Returns 6 opencode tool instances:
 
 ```typescript
-const { status } = createWorkspaceTools()
+const { status, assemble, open, edit, add, remove } = createWorkspaceTools()
 ```
 
 | Tool | Description |
 |------|-------------|
 | `status` | Show workspace overview: volume sizes, active workspace entry |
+| `assemble` | Create a new workspace theme that gathers related memory entries |
+| `open` | Open the active workspace theme with all gathered entries expanded inline |
+| `edit` | Edit the theme's own content (description, notes) |
+| `add` | Gather additional entries into the active workspace theme |
+| `remove` | Remove entries from the active workspace theme (original entries unaffected) |
+
+#### `assemble` args
+
+| Arg | Type | Required | Description |
+|-----|------|----------|-------------|
+| `content` | `string` | ✓ | Theme description (title + context) |
+| `entries` | `string[]` | — | Entry IDs to gather into this theme |
+| `tags` | `string[]` | — | Tags for the theme entry |
+| `keywords` | `string[]` | — | 2-5 keywords for discovery |
+
+#### `open` args
+
+| Arg | Type | Required | Description |
+|-----|------|----------|-------------|
+| `id` | `string` | — | Theme entry ID (defaults to active workspace) |
+
+#### `edit` args
+
+| Arg | Type | Required | Description |
+|-----|------|----------|-------------|
+| `from` | `number` | ✓ | First line number to replace (1-indexed) |
+| `to` | `number` | — | Last line number to replace (defaults to `from`) |
+| `content` | `string` | ✓ | Replacement text |
+| `message` | `string` | ✓ | Why this edit was made |
+| `id` | `string` | — | Theme entry ID (defaults to active workspace) |
+
+#### `add` args
+
+| Arg | Type | Required | Description |
+|-----|------|----------|-------------|
+| `entries` | `string[]` | ✓ | Entry IDs to gather into the theme |
+| `id` | `string` | — | Theme entry ID (defaults to active workspace) |
+
+#### `remove` args
+
+| Arg | Type | Required | Description |
+|-----|------|----------|-------------|
+| `entries` | `string[]` | ✓ | Entry IDs to remove from the theme |
+| `id` | `string` | — | Theme entry ID (defaults to active workspace) |
 
 ### `createTelescopeTool()`
 

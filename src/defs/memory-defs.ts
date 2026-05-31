@@ -20,25 +20,21 @@ interface ParsedEdit {
   start: number
   end: number
   content: string
-  rawRange: string
+  label: string   // human-readable label for error messages
 }
 
-function parseRange(range: string, totalLines: number): { start: number; end: number } | string {
-  const trimmed = range.trim()
-  const single = trimmed.match(/^(\d+)$/)
-  if (single) {
-    const n = parseInt(single[1], 10)
-    if (n < 1 || n > totalLines) return `Line ${n} out of range (1-${totalLines}).`
-    return { start: n, end: n }
+function normalizeEditRange(edit: { from?: number; to?: number }, totalLines: number): { start: number; end: number; label: string } | string {
+  if (edit.from === undefined || edit.from === null) {
+    return `Edit must specify 'from' (1-indexed line number).`
   }
-  const rangeMatch = trimmed.match(/^(\d+)-(\d+)$/)
-  if (rangeMatch) {
-    const s = parseInt(rangeMatch[1], 10)
-    const e = parseInt(rangeMatch[2], 10)
-    if (s < 1 || e > totalLines || s > e) return `Range ${trimmed} invalid (1-${totalLines}).`
-    return { start: s, end: e }
-  }
-  return `Invalid range format "${trimmed}". Use '43' or '43-54'.`
+  const f = typeof edit.from === "number" ? edit.from : parseInt(String(edit.from), 10)
+  const t = (edit.to !== undefined && edit.to !== null)
+    ? (typeof edit.to === "number" ? edit.to : parseInt(String(edit.to), 10))
+    : f
+  if (isNaN(f) || isNaN(t)) return `Invalid from/to values: from=${edit.from}, to=${edit.to}.`
+  if (f < 1 || t < 1 || f > totalLines || t > totalLines) return `Line range ${f}-${t} out of range (1-${totalLines}).`
+  if (f > t) return `Invalid range: from (${f}) > to (${t}).`
+  return { start: f, end: t, label: `${f}-${t}` }
 }
 
 function formatContent(content: string): string {
@@ -195,14 +191,16 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       "Edit a memory entry's content lines and/or refs. " +
       "Only the entry's author can revise. Append-only volumes disallow revision. " +
       "Line numbers come from memory_show output (1-indexed, left of the '|' separator). " +
-      "Each edit replaces the specified line range with new content. " +
+      "Each edit uses 'from'/'to' to specify which lines to replace with 'content'. " +
+      "'to' defaults to 'from' (single line) if omitted. " +
       "Multiple edits are applied back-to-front (highest line first) to avoid offset drift. " +
       "Changes are committed to git automatically.",
     args: {
       id: z.string().describe("Entry ID to revise (must be your own entry)."),
       edits: z.array(z.object({
-        range: z.string().describe("1-indexed line range from memory_show output. Single line: '43'. Span: '43-54'. Replaces those lines with 'content'."),
-        content: z.string().describe("Replacement text for the specified range. Use empty string to delete lines."),
+        from: z.number().describe("First line number to replace (1-indexed, from memory_show output). Required."),
+        to: z.number().optional().describe("Last line number to replace (1-indexed, inclusive). Defaults to 'from' if omitted."),
+        content: z.string().describe("Replacement text for the specified lines. Use empty string to delete lines."),
       })).optional().describe("Line-level content edits. Multiple edits are processed highest-line-first to preserve line numbers."),
       refs_add: z.array(z.object({
         target: z.string().describe("Entry ID to reference."),
@@ -216,10 +214,10 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
 
       // Defensive: opencode may pass arrays as JSON strings or with broken element shapes.
       // Validate each element with Zod to guarantee correct types before use.
-      const editSchema = z.object({ range: z.string(), content: z.string() })
+      const editSchema = z.object({ from: z.number().optional(), to: z.number().optional(), content: z.string() })
       const edits = ensureArray(args.edits, editSchema)
       if (args.edits && !edits.length) {
-        return `\u274c 'edits' was provided but all elements failed validation. Each edit needs 'range' (string) and 'content' (string). Raw input: ${JSON.stringify(args.edits).slice(0, 200)}`
+        return `\u274c 'edits' was provided but all elements failed validation. Each edit needs 'from' (number) and 'content' (string). Raw input: ${JSON.stringify(args.edits).slice(0, 200)}`
       }
       const refSchema = z.object({ target: z.string(), reason: z.string() })
       const refs_add = ensureArray(args.refs_add, refSchema)
@@ -262,16 +260,16 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         const parsedEdits: ParsedEdit[] = []
 
         for (const edit of edits) {
-          const result = parseRange(edit.range, totalLines)
+          const result = normalizeEditRange(edit, totalLines)
           if (typeof result === "string") return `\u274c ${result}`
-          parsedEdits.push({ start: result.start, end: result.end, content: edit.content, rawRange: edit.range.trim() })
+          parsedEdits.push({ start: result.start, end: result.end, content: edit.content, label: result.label })
         }
 
         parsedEdits.sort((a, b) => b.start - a.start)
 
         for (let i = 0; i < parsedEdits.length - 1; i++) {
           if (parsedEdits[i].start <= parsedEdits[i + 1].end) {
-            return `\u274c Range "${parsedEdits[i].rawRange}" and "${parsedEdits[i + 1].rawRange}" overlap.`
+            return `\u274c Range "${parsedEdits[i].label}" and "${parsedEdits[i + 1].label}" overlap.`
           }
         }
 
@@ -281,7 +279,7 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         }
 
         newContent = lines.join("\n")
-        changes.push(`content(${parsedEdits.map((e) => e.rawRange).join(", ")})`)
+        changes.push(`content(${parsedEdits.map((e) => e.label).join(", ")})`)
       }
 
       let newRefs: MemoryRef[] = [...(entry.refs || [])]
