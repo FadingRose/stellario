@@ -1,10 +1,13 @@
 import { execSync } from "child_process"
-import type { StellarioConfig } from "./types.js"
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs"
+import { join } from "path"
+import type { StellarioConfig, MemoryEntry } from "./types.js"
 import { profileBehavior } from "./types.js"
 import { getTrackedVolumes } from "./config.js"
+import { readJsonl, formatEntryMdForTrack, ensureTrackVolumeDir } from "./store.js"
 
 /**
- * Git commit helper. Only commits version-controlled volumes.
+ * Git commit helper. Stages volume JSONL, volume MD, and any per-entry .track files.
  * Returns short commit hash on success, null on failure or skipped.
  */
 export function gitCommit(
@@ -12,13 +15,21 @@ export function gitCommit(
   volume: string,
   message: string,
   config: StellarioConfig,
+  entryIds?: string[],
 ): string | null {
   const def = config.volumes[volume]
   if (!def) return null
   if (!profileBehavior(def.profile).isTracked) return null
 
   try {
-    execSync(`git add ${volume}.jsonl ${volume}.md`, { cwd: memDir, stdio: "pipe" })
+    const files = [`${volume}.jsonl`, `${volume}.md`]
+    if (entryIds && entryIds.length > 0) {
+      for (const id of entryIds) {
+        files.push(`.track/${volume}/${id}.md`)
+      }
+    }
+    // -A handles add/modify/delete for per-entry md files (forget removes them)
+    execSync(`git add -A ${files.join(" ")}`, { cwd: memDir, stdio: "pipe" })
     execSync(`git commit -m ${JSON.stringify(message)}`, { cwd: memDir, stdio: "pipe" })
     return execSync("git rev-parse --short HEAD", { cwd: memDir }).toString().trim()
   } catch {
@@ -48,5 +59,96 @@ export function initGitRepo(memDir: string): boolean {
     return true
   } catch {
     return false
+  }
+}
+
+// =============================================================================
+// Per-Entry Markdown Migration
+// =============================================================================
+
+const TRACK_MARKER = ".track/.migrated"
+
+/**
+ * Run migration once: generate per-entry .track/{volume}/{id}.md files
+ * for all existing entries, then commit them. Idempotent (checks marker file).
+ */
+export function migrateTrackMd(
+  memDir: string,
+  config: StellarioConfig,
+): { entries: number; migrated: boolean } {
+  const markerPath = join(memDir, TRACK_MARKER)
+  if (existsSync(markerPath)) return { entries: 0, migrated: false }
+
+  const trackRoot = join(memDir, ".track")
+  let count = 0
+
+  for (const volume of Object.keys(config.volumes)) {
+    const entries = readJsonl(memDir, volume)
+    if (entries.length === 0) continue
+    ensureTrackVolumeDir(memDir, volume)
+    for (const entry of entries) {
+      writeFileSync(
+        join(trackRoot, volume, `${entry.id}.md`),
+        formatEntryMdForTrack(entry),
+        "utf-8",
+      )
+      count++
+    }
+  }
+
+  // Also handle archived entries
+  const archivedEntries = readJsonl(memDir, "archived")
+  if (archivedEntries.length > 0) {
+    ensureTrackVolumeDir(memDir, "archived")
+    for (const entry of archivedEntries) {
+      writeFileSync(
+        join(trackRoot, "archived", `${entry.id}.md`),
+        formatEntryMdForTrack(entry),
+        "utf-8",
+      )
+      count++
+    }
+  }
+
+  // Write marker
+  if (!existsSync(trackRoot)) mkdirSync(trackRoot, { recursive: true })
+  writeFileSync(markerPath, "", "utf-8")
+
+  // Initial git commit for migrated files
+  if (count > 0 && isGitRepo(memDir)) {
+    try {
+      execSync(`git add .track/`, { cwd: memDir, stdio: "pipe" })
+      execSync(
+        `git commit -m "migrate: initial per-entry md tracking (${count} entries)"`,
+        { cwd: memDir, stdio: "pipe" },
+      )
+    } catch {
+      // Non-critical — files are written, commit can happen next operation
+    }
+  }
+
+  return { entries: count, migrated: true }
+}
+
+/**
+ * Run git log for a specific entry's track file to get its revision history.
+ */
+export function gitLogEntry(
+  memDir: string,
+  volume: string,
+  id: string,
+  limit: number = 10,
+): string | null {
+  if (!isGitRepo(memDir)) return null
+
+  try {
+    const path = `.track/${volume}/${id}.md`
+    const log = execSync(
+      `git log --oneline -${limit} -- ${path}`,
+      { cwd: memDir, stdio: "pipe" },
+    ).toString().trim()
+    return log || null
+  } catch {
+    return null
   }
 }

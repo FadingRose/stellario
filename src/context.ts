@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "fs"
 import { join } from "path"
 import type { StellarioConfig, ToolContext } from "./types.js"
 import { loadConfig, getMemoryDir } from "./config.js"
+import { initGitRepo, migrateTrackMd } from "./git.js"
 
 // =============================================================================
 // Context Resolution
@@ -19,12 +20,24 @@ export interface ResolvedContext {
 }
 
 /**
+ * Track initialization state to avoid repeated migration checks.
+ */
+let _trackInitialized = false
+
+/**
  * Resolve the full runtime context from an opencode ToolContext.
- * Loads config and computes paths.
+ * Loads config, computes paths, and runs one-time initialization.
  */
 export function resolveContext(ctx: ToolContext): ResolvedContext {
   const config = loadConfig(ctx.directory)
   const memDir = getMemoryDir(config, ctx.directory)
+
+  // One-time initialization: git repo + per-entry md migration
+  if (!_trackInitialized) {
+    initGitRepo(memDir)
+    migrateTrackMd(memDir, config)
+    _trackInitialized = true
+  }
 
   return {
     config,

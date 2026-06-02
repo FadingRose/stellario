@@ -3,6 +3,7 @@ import {
   writeFileSync,
   existsSync,
   mkdirSync,
+  unlinkSync,
 } from "fs"
 import { randomUUID } from "crypto"
 import { join } from "path"
@@ -218,6 +219,18 @@ function parseJsonlContent(content: string, volumeHint: string): MemoryEntry[] {
       if (!entry.volume) {
         entry.volume = volumeHint
       }
+      // Normalize new fields for backward compatibility (CL-1)
+      if (Array.isArray(entry.refs)) {
+        for (const ref of entry.refs) {
+          if (!ref.source) (ref as any).source = "manual"
+        }
+      }
+      if (entry.refs_removed === undefined) {
+        entry.refs_removed = []
+      }
+      if (!Array.isArray(entry.refs_removed)) {
+        entry.refs_removed = []
+      }
       return entry
     })
 }
@@ -411,4 +424,60 @@ function regenerateMd(memDir: string, volume: string, entries: MemoryEntry[]): v
   }
 
   writeFileSync(join(memDir, `${volume}.md`), lines.join("\n"), "utf-8")
+}
+
+// =============================================================================
+// Per-Entry Markdown Tracking (.track/{volume}/{id}.md)
+// =============================================================================
+
+/**
+ * Format a single entry as a markdown file for git tracking.
+ * These files exist purely for git history — they are never read by tools.
+ */
+export function formatEntryMdForTrack(entry: MemoryEntry): string {
+  const lines: string[] = [
+    `# ${entry.id}`,
+    "",
+    entry.content,
+    "",
+    `tags: ${entry.tags.join(" · ")}`,
+    `keywords: ${entry.keywords.join(" · ")}`,
+    `author: ${entry.author}`,
+    `created: ${entry.created}`,
+    `updated: ${entry.updated}`,
+    "",
+  ]
+  return lines.join("\n")
+}
+
+/**
+ * Return the .track/{volume} directory path, creating it if needed.
+ */
+export function ensureTrackVolumeDir(memDir: string, volume: string): string {
+  const dir = join(memDir, ".track", volume)
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+/**
+ * Write a per-entry markdown file for git tracking.
+ */
+export function writeEntryMd(memDir: string, volume: string, entry: MemoryEntry): void {
+  const dir = ensureTrackVolumeDir(memDir, volume)
+  writeFileSync(join(dir, `${entry.id}.md`), formatEntryMdForTrack(entry), "utf-8")
+}
+
+/**
+ * Remove a per-entry markdown file (called on forget).
+ */
+export function removeEntryMd(memDir: string, volume: string, id: string): void {
+  const path = join(memDir, ".track", volume, `${id}.md`)
+  if (existsSync(path)) unlinkSync(path)
+}
+
+/**
+ * Get the path to a per-entry md file (for git operations).
+ */
+export function getEntryMdPath(volume: string, id: string): string {
+  return `.track/${volume}/${id}.md`
 }

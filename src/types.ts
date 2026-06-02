@@ -53,6 +53,14 @@ export type Authority = "source" | "curated" | "synthesized"
 
 // ─── Volume Definition ──────────────────────────────────────────────────────
 
+/** Auto-refs configuration for a volume. */
+export interface AutoRefsConfig {
+  /** Enable automatic bidirectional linking based on tag+keyword overlap. */
+  enabled: boolean
+  /** Keyword similarity threshold (cosine similarity). Default: 0.65. */
+  threshold?: number
+}
+
 export interface VolumeDef {
   profile: Profile
   boundaries: Boundaries
@@ -61,6 +69,8 @@ export interface VolumeDef {
   requiredTagPrefix?: string
   /** Optional: custom ID prefix character (defaults to first char of volume name). */
   idPrefix?: string
+  /** Optional: auto-refs configuration. When enabled, create/revise trigger automatic linking. */
+  autoRefs?: AutoRefsConfig
 }
 
 // ─── Agent Definition ───────────────────────────────────────────────────────
@@ -104,8 +114,10 @@ export interface StellarioConfig {
 // ─── Storage Types ──────────────────────────────────────────────────────────
 
 export interface MemoryRef {
-  target: string   // referenced entry ID
-  reason: string   // why this entry references the target
+  target: string            // referenced entry ID
+  reason: string            // why this entry references the target
+  /** How this ref was created. "manual" = agent via memory_link. "auto" = auto_refs engine. */
+  source: "manual" | "auto"
 }
 
 export interface MemoryEntry {
@@ -118,6 +130,9 @@ export interface MemoryEntry {
   created: string    // YYYY-MM-DD
   updated: string    // YYYY-MM-DD
   refs?: MemoryRef[]
+  /** Targets the agent has explicitly unlinked via memory_unlink.
+   *  auto_refs engine will never re-link these. Cleared when agent manually links. */
+  refs_removed?: string[]
   archived_at?: string
   archived_reason?: string
 }

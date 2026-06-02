@@ -238,7 +238,7 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
         if (!canRead(agent, found.volume, ctx.config)) {
           return `\u274c Agent "${agent}" cannot read entry "${id}" (volume: ${found.volume}).`
         }
-        refs.push({ target: found.entry.id, reason: `gathered in theme` })
+        refs.push({ target: found.entry.id, reason: `gathered in theme`, source: "manual" })
       }
 
       const tags = dedupeTags(ensureStringArray(args.tags))
@@ -484,7 +484,7 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
           return `\u274c Agent "${agent}" cannot read entry "${id}".`
         }
         if (!existingTargets.has(refFound.entry.id)) {
-          newRefs.push({ target: refFound.entry.id, reason: `gathered in theme` })
+          newRefs.push({ target: refFound.entry.id, reason: `gathered in theme`, source: "manual" })
           existingTargets.add(refFound.entry.id)
         }
       }

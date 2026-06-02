@@ -165,6 +165,31 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return sum
 }
 
+/**
+ * Compute the maximum pairwise keyword similarity between two indexed entries.
+ * Returns the best matching keyword pair and its score.
+ * Used by auto_refs for semantic linking decisions.
+ */
+export function entryKeywordSimilarity(
+  sourceKeywords: string[],
+  sourceVectors: number[][],
+  candidateKeywords: string[],
+  candidateVectors: number[][],
+): { score: number; kwPair: string } {
+  let bestScore = 0
+  let bestPair = ""
+  for (let i = 0; i < sourceKeywords.length; i++) {
+    for (let j = 0; j < candidateKeywords.length; j++) {
+      const score = cosineSimilarity(sourceVectors[i], candidateVectors[j])
+      if (score > bestScore) {
+        bestScore = score
+        bestPair = `${sourceKeywords[i]}≈${candidateKeywords[j]}`
+      }
+    }
+  }
+  return { score: bestScore, kwPair: bestPair }
+}
+
 // =============================================================================
 // Keyword Index (JSONL)
 // =============================================================================

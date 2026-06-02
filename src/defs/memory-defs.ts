@@ -5,9 +5,11 @@ import { resolveAgent, canRead, canWrite, canRevise, canForget, isAuthor, writab
 import {
   readJsonl, writeEntries, generateNextId, findEntry,
   today, truncate, extractTitle, dedupeTags, ensureStringArray, ensureArray,
+  writeEntryMd, removeEntryMd, getEntryMdPath,
 } from "../store.js"
-import { gitCommit } from "../git.js"
-import { updateEntryIndex, removeEntryIndex } from "../embedding.js"
+import { gitCommit, gitLogEntry } from "../git.js"
+import { updateEntryIndex, removeEntryIndex, probeEmbeddingAvailability } from "../embedding.js"
+import { computeAutoRefs, applyAutoRefsPlan, type AutoRefsPlan } from "../auto-refs.js"
 
 // =============================================================================
 // Shared Helpers
@@ -123,9 +125,34 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
 
       const entries = readJsonl(ctx.memDir, volumeName)
       entries.push(entry)
+
+      // Auto-refs: find bidirectional links before writing (CL-8/CL-10)
+      let autoRefChangedIds: string[] = []
+      if (def.autoRefs?.enabled) {
+        const embAvail = false // Use text fallback for create (index not yet updated)
+        const kwIndexMap = new Map<string, import("../embedding.js").KeywordIndexEntry>()
+        const plan = computeAutoRefs(entry, entries, ctx.config, embAvail, kwIndexMap)
+        autoRefChangedIds = applyAutoRefsPlan(plan, entries, entry.id)
+      }
+
       writeEntries(ctx.memDir, volumeName, entries, ctx.config)
 
-      const commitHash = gitCommit(ctx.memDir, volumeName, `create: ${truncate(args.content, 50)}\n\nEntry: ${id}\nVolume: ${volumeName}\nAuthor: ${agent}`, ctx.config)
+      // Per-entry md for source and all auto-ref touched entries
+      writeEntryMd(ctx.memDir, volumeName, entry)
+      for (const cid of autoRefChangedIds) {
+        if (cid === entry.id) continue
+        const changed = entries.find(e => e.id === cid)
+        if (changed) writeEntryMd(ctx.memDir, volumeName, changed)
+      }
+
+      const autoRefNote = autoRefChangedIds.length > 1
+        ? `\n[auto_refs: ${autoRefChangedIds.filter(id => id !== entry.id).map(id => `↔${id}`).join(", ")}]`
+        : ""
+      const commitHash = gitCommit(
+        ctx.memDir, volumeName,
+        `create: ${truncate(args.content, 50)}\n\nEntry: ${id}\nVolume: ${volumeName}\nAuthor: ${agent}${autoRefNote}`,
+        ctx.config, [id, ...autoRefChangedIds],
+      )
 
       // Update keyword index (async, non-blocking)
       if (keywords.length > 0) {
@@ -200,6 +227,8 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         to: z.number().optional().describe("Last line number to replace (1-indexed, inclusive). Defaults to 'from' if omitted."),
         content: z.string().describe("Replacement text for the specified lines. Use empty string to delete lines."),
       })).optional().describe("Line-level content edits. Multiple edits are processed highest-line-first to preserve line numbers."),
+      tags: z.array(z.string()).optional().describe("Replace entry tags (namespace:name format). Omit to keep existing tags."),
+      keywords: z.array(z.string()).optional().describe("Replace entry keywords. Omit to keep existing keywords."),
       message: z.string().describe("Commit message describing why this revision was made."),
     },
     async execute(args, context: ToolContext) {
@@ -213,7 +242,9 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         return `\u274c 'edits' was provided but all elements failed validation. Each edit needs 'from' (number) and 'content' (string). Raw input: ${JSON.stringify(args.edits).slice(0, 200)}`
       }
 
-      if (!edits.length) return "\u274c revise requires 'edits'."
+      if (!edits.length && !args.tags && !args.keywords) {
+        return "\u274c revise requires 'edits', 'tags', or 'keywords'."
+      }
       if (!args.message) return "\u274c revise requires a 'message'."
 
       const ctx = resolveContext(context)
@@ -273,15 +304,65 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         content: newContent,
         updated: today(),
       }
+
+      // Update tags if provided
+      let tagsChanged = false
+      if (args.tags !== undefined) {
+        const newTags = dedupeTags(ensureStringArray(args.tags))
+        if (JSON.stringify(newTags) !== JSON.stringify(entry.tags)) {
+          tagsChanged = true
+          changes.push("tags")
+        }
+        updatedEntry.tags = newTags
+      }
+
+      // Update keywords if provided
+      let keywordsChanged = false
+      if (args.keywords !== undefined) {
+        const newKeywords = ensureStringArray(args.keywords)
+        if (JSON.stringify(newKeywords) !== JSON.stringify(entry.keywords)) {
+          keywordsChanged = true
+          changes.push("keywords")
+        }
+        updatedEntry.keywords = newKeywords
+      }
+
       entries[entryIndex] = updatedEntry
+
+      // Auto-refs if tags or keywords changed (CL-8/CL-9/CL-10)
+      let autoRefChangedIds: string[] = []
+      const autoRefEnabled = ctx.config.volumes[volume]?.autoRefs?.enabled
+      if (autoRefEnabled && (tagsChanged || keywordsChanged)) {
+        const embAvail = false // Use text fallback (consistent with create)
+        const kwIndexMap = new Map<string, import("../embedding.js").KeywordIndexEntry>()
+        const plan = computeAutoRefs(updatedEntry, entries, ctx.config, embAvail, kwIndexMap)
+        autoRefChangedIds = applyAutoRefsPlan(plan, entries, updatedEntry.id)
+      }
+
       writeEntries(ctx.memDir, volume, entries, ctx.config)
 
-      // Re-index keywords if content changed (async, non-blocking)
-      if (edits.length > 0 && updatedEntry.keywords.length > 0) {
+      // Per-entry md for source and all auto-ref touched entries
+      writeEntryMd(ctx.memDir, volume, updatedEntry)
+      for (const cid of autoRefChangedIds) {
+        if (cid === updatedEntry.id) continue
+        const changed = entries.find(e => e.id === cid)
+        if (changed) writeEntryMd(ctx.memDir, volume, changed)
+      }
+
+      // Re-index keywords if changed (async, non-blocking)
+      if ((edits.length > 0 || keywordsChanged) && updatedEntry.keywords.length > 0) {
         updateEntryIndex(ctx.memDir, args.id, updatedEntry.keywords).catch(() => {})
       }
 
-      const commitHash = gitCommit(ctx.memDir, volume, `revise: ${args.message}\n\nEntry: ${args.id}\nChanges: ${changes.join(", ")}`, ctx.config)
+      const allChangedIds = [args.id, ...autoRefChangedIds]
+      const autoRefNote = autoRefChangedIds.length > 0
+        ? `\n[auto_refs: ${autoRefChangedIds.filter(id => id !== args.id).map(id => `↔${id}`).join(", ")}]`
+        : ""
+      const commitHash = gitCommit(
+        ctx.memDir, volume,
+        `revise: ${args.message}\n\nEntry: ${args.id}\nChanges: ${changes.join(", ")}${autoRefNote}`,
+        ctx.config, allChangedIds,
+      )
 
       return [
         `Revised [${args.id}] \u2192 ${volume}`,
@@ -339,7 +420,14 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       // Remove from keyword index
       removeEntryIndex(ctx.memDir, args.id)
 
-      const commitHash = gitCommit(ctx.memDir, volume, `archive: ${truncate(entry.content, 50)}\n\nEntry: ${args.id}\nFrom: ${volume} \u2192 archived`, ctx.config)
+      // Per-entry md: remove from source volume, create in archived
+      removeEntryMd(ctx.memDir, volume, args.id)
+      writeEntryMd(ctx.memDir, "archived", archivedEntry)
+
+      const commitHash = gitCommit(ctx.memDir, volume, `archive: ${truncate(entry.content, 50)}\n\nEntry: ${args.id}\nFrom: ${volume} \u2192 archived`, ctx.config, [args.id])
+
+      // Also commit the archived volume changes
+      gitCommit(ctx.memDir, "archived", `archived: ${truncate(entry.content, 50)}\n\nEntry: ${args.id}\nFrom: ${volume}`, ctx.config, [args.id])
 
       return [
         `Archived [${args.id}] ${volume} \u2192 archived`,
@@ -369,7 +457,19 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         return `\u274c Agent "${agent}" cannot read volume "${found.volume}".`
       }
 
-      return `History for [${args.id}] in ${found.volume}: (git history lookup - see Lilac implementation for full detail)`
+      const limit = typeof args.limit === "number" ? args.limit : 10
+      const vol = found.volume
+      const log = gitLogEntry(ctx.memDir, vol, args.id, limit)
+
+      if (!log) {
+        return `No git history for [${args.id}] in ${vol}.\n(The memory directory may not be a git repo, or the entry has no tracked changes yet.)`
+      }
+
+      return [
+        `History for [${args.id}] in ${vol}:`,
+        "",
+        log,
+      ].join("\n")
     },
   }
 
@@ -433,5 +533,168 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
     },
   }
 
-  return { create, show, revise, forget, history, meta }
+  // ─── link: create a manual reference between entries ───────────────────────
+
+  const link: ToolDef = {
+    description:
+      "Create a manual reference from one entry to another. " +
+      "Manual refs are permanent — the auto_refs engine never removes them. " +
+      "If the target was previously unlinked (in refs_removed), it is restored.",
+    args: {
+      id: z.string().describe("Source entry ID to link from."),
+      target: z.string().describe("Target entry ID to link to."),
+      reason: z.string().describe("Why this link is created."),
+    },
+    async execute(args, context: ToolContext) {
+      if (!args.id || !args.target) return "\u274c link requires 'id' and 'target'."
+      if (!args.reason?.trim()) return "\u274c link requires 'reason'."
+      if (args.id === args.target) return "\u274c Cannot link an entry to itself."
+
+      const ctx = resolveContext(context)
+      const agent = resolveAgent(context.agent, ctx.config)
+      if (!agent) return `\u274c Unknown agent: "${context.agent}"`
+
+      // Validate source
+      const sourceFound = findEntry(ctx.memDir, args.id, ctx.config)
+      if (!sourceFound) return `\u274c Source entry "${args.id}" not found.`
+      if (!canWrite(agent, sourceFound.volume, ctx.config)) {
+        return `\u274c Agent "${agent}" cannot write to volume "${sourceFound.volume}".`
+      }
+
+      // Validate target
+      const targetFound = findEntry(ctx.memDir, args.target, ctx.config)
+      if (!targetFound) return `\u274c Target entry "${args.target}" not found.`
+      if (!canRead(agent, targetFound.volume, ctx.config)) {
+        return `\u274c Agent "${agent}" cannot read target volume "${targetFound.volume}".`
+      }
+      if (targetFound.entry.archived_at) {
+        return `\u274c Cannot link to archived entry "${args.target}".`
+      }
+
+      const volume = sourceFound.volume
+      const entries = readJsonl(ctx.memDir, volume)
+      const source = entries.find(e => e.id === args.id)
+      if (!source) return `\u274c Source entry "${args.id}" not found in ${volume}.`
+
+      // Already linked?
+      if (source.refs?.some(r => r.target === args.target)) {
+        return `\u274c [${args.id}] is already linked to [${args.target}].`
+      }
+
+      // Restore from refs_removed if needed (CL-9)
+      if (source.refs_removed?.includes(args.target)) {
+        source.refs_removed = source.refs_removed.filter(t => t !== args.target)
+      }
+
+      if (!source.refs) source.refs = []
+      source.refs.push({
+        target: args.target,
+        reason: args.reason.trim(),
+        source: "manual",
+      })
+      source.updated = today()
+
+      writeEntries(ctx.memDir, volume, entries, ctx.config)
+      writeEntryMd(ctx.memDir, volume, source)
+
+      const commitHash = gitCommit(
+        ctx.memDir, volume,
+        `link: ${args.id} → ${args.target}\n\nReason: ${args.reason}`,
+        ctx.config, [args.id],
+      )
+
+      return [
+        `Linked [${args.id}] → [${args.target}]`,
+        `Reason: ${args.reason}`,
+        commitHash ? `Commit: ${commitHash}` : "",
+      ].filter(Boolean).join("\n")
+    },
+  }
+
+  // ─── unlink: remove a reference between entries ────────────────────────────
+
+  const unlink: ToolDef = {
+    description:
+      "Remove a reference from one entry to another. " +
+      "For auto links (source:'auto'): both sides are removed, and the target " +
+      "is added to refs_removed to prevent auto_re-linking. " +
+      "For manual links (source:'manual'): only the specified link is removed.",
+    args: {
+      id: z.string().describe("Entry ID to remove a link from."),
+      target: z.string().describe("Target entry ID to unlink."),
+    },
+    async execute(args, context: ToolContext) {
+      if (!args.id || !args.target) return "\u274c unlink requires 'id' and 'target'."
+
+      const ctx = resolveContext(context)
+      const agent = resolveAgent(context.agent, ctx.config)
+      if (!agent) return `\u274c Unknown agent: "${context.agent}"`
+
+      const sourceFound = findEntry(ctx.memDir, args.id, ctx.config)
+      if (!sourceFound) return `\u274c Source entry "${args.id}" not found.`
+      if (!canWrite(agent, sourceFound.volume, ctx.config)) {
+        return `\u274c Agent "${agent}" cannot write to volume "${sourceFound.volume}".`
+      }
+
+      const volume = sourceFound.volume
+      const entries = readJsonl(ctx.memDir, volume)
+      const source = entries.find(e => e.id === args.id)
+      if (!source) return `\u274c Source entry "${args.id}" not found in ${volume}.`
+
+      const refIdx = source.refs?.findIndex(r => r.target === args.target) ?? -1
+      if (refIdx === -1) {
+        // Already unlinked — check refs_removed
+        if (source.refs_removed?.includes(args.target)) {
+          return `\u274c [${args.id}] is already unlinked from [${args.target}].`
+        }
+        return `\u274c No link from [${args.id}] to [${args.target}].`
+      }
+
+      const ref = source.refs![refIdx]
+      const changedIds = [source.id]
+
+      if (ref.source === "auto") {
+        // CL-10 + CL-12: remove from both sides, add to refs_removed
+        source.refs!.splice(refIdx, 1)
+        if (!source.refs_removed) source.refs_removed = []
+        source.refs_removed.push(args.target)
+
+        // Remove reverse auto link from target (CL-10)
+        const target = entries.find(e => e.id === args.target)
+        if (target?.refs) {
+          target.refs = target.refs.filter(
+            r => !(r.target === args.id && r.source === "auto")
+          )
+          target.updated = today()
+          changedIds.push(target.id)
+        }
+      } else {
+        // CL-12: manual ref — just remove, no refs_removed
+        source.refs!.splice(refIdx, 1)
+      }
+
+      source.updated = today()
+
+      // Write all changed entries
+      writeEntries(ctx.memDir, volume, entries, ctx.config)
+      for (const cid of changedIds) {
+        const e = entries.find(x => x.id === cid)
+        if (e) writeEntryMd(ctx.memDir, volume, e)
+      }
+
+      const commitHash = gitCommit(
+        ctx.memDir, volume,
+        `unlink: ${args.id} ⊥ ${args.target}`,
+        ctx.config, changedIds,
+      )
+
+      const refType = ref.source === "auto" ? "auto (bidirectional)" : "manual"
+      return [
+        `Unlinked [${args.id}] ⊥ [${args.target}] (${refType})`,
+        commitHash ? `Commit: ${commitHash}` : "",
+      ].filter(Boolean).join("\n")
+    },
+  }
+
+  return { create, show, revise, forget, history, meta, link, unlink }
 }
