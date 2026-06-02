@@ -40,7 +40,14 @@ export function readTasks(memDir: string): Task[] {
     return content
       .split("\n")
       .filter(line => line.trim())
-      .map(line => JSON.parse(line) as Task)
+      .map(line => {
+        const task = JSON.parse(line) as Task
+        // Normalize array fields (defensive, same as parseJsonlContent)
+        if (!Array.isArray(task.paths)) task.paths = []
+        if (!Array.isArray(task.depends_on)) task.depends_on = []
+        if (!Array.isArray(task.tags)) task.tags = []
+        return task
+      })
   } catch {
     return []
   }
