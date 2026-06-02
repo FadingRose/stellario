@@ -74,6 +74,7 @@ function validateConfig(raw: any, sourcePath: string): StellarioConfig {
       authority: v.authority,
       requiredTagPrefix: v.requiredTagPrefix,
       idPrefix: v.idPrefix,
+      autoRefs: v.autoRefs,
     }
   }
 

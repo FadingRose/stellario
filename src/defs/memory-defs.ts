@@ -207,6 +207,18 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         lines.push(`keywords: ${entry.keywords.join(", ")}`)
       }
 
+      if (entry.refs && entry.refs.length > 0) {
+        lines.push("")
+        for (const ref of entry.refs) {
+          const icon = ref.source === "auto" ? "⟷" : "→"
+          lines.push(`ref: ${icon} [${ref.target}] (${ref.source}: ${ref.reason})`)
+        }
+      }
+
+      if (entry.refs_removed && entry.refs_removed.length > 0) {
+        lines.push(`refs_removed: [${entry.refs_removed.join("], [")}]`)
+      }
+
       return lines.join("\n")
     },
   }
