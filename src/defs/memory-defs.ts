@@ -211,7 +211,7 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         lines.push("")
         for (const ref of entry.refs) {
           const icon = ref.source === "auto" ? "⟷" : "→"
-          lines.push(`ref: ${icon} [${ref.target}] (${ref.source}: ${ref.reason})`)
+          lines.push(`ref: ${icon} [${ref.target}] (${ref.reason})`)
         }
       }
 
