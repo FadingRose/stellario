@@ -1,13 +1,13 @@
 import type { ToolContext, ToolDef, StellarioConfig, MemoryEntry, MemoryRef } from "../types.js"
 import { resolveContext } from "../context.js"
-import { resolveAgent, canRead, canWrite } from "../permissions.js"
-import { readJsonl, readVolumeIndex, extractTitle, findEntry, getActiveWorkspace, setActiveWorkspace, writeEntries, generateNextId, dedupeTags, ensureStringArray, ensureArray, today } from "../store.js"
+import { resolveAgent, canRead, canWrite, isAuthor } from "../permissions.js"
+import { readJsonl, readVolumeIndex, extractTitle, findEntry, getActiveWorkspace, setActiveWorkspace, writeEntries, generateNextId, dedupeTags, ensureStringArray, ensureArray, today, getLinkedVolumes, getLinkedVolumeSymlinkPath } from "../store.js"
 import { loadConfig, getMemoryDir, getWorkspaceVolume } from "../config.js"
 import { queryTasks } from "../coord/store.js"
 import { getAllActiveLocks } from "../coord/lock.js"
 import { gitCommit } from "../git.js"
 import { existsSync, readFileSync } from "fs"
-import { join } from "path"
+import { join, basename } from "path"
 import { z } from "zod"
 import { updateEntryIndex } from "../embedding.js"
 
@@ -30,6 +30,8 @@ export function buildStatus(projectRoot: string, agentName: string): string {
 
   if (!existsSync(memDir)) {
     lines.push("Memory: empty (not initialized)")
+    lines.push("")
+    lines.push("This appears to be a fresh install. If you are the primary agent, enter wizard mode: greet the user, read stellario.yaml together, and help them configure their memory system.")
     return lines.join("\n")
   }
 
@@ -37,6 +39,7 @@ export function buildStatus(projectRoot: string, agentName: string): string {
   const volumeIndex = readVolumeIndex(memDir)
   const indexMap = new Map(volumeIndex.map(e => [e.volume, e]))
   const parts: string[] = []
+  let totalEntries = 0
 
   for (const [name, def] of Object.entries(config.volumes)) {
     const idx = indexMap.get(name)
@@ -56,6 +59,7 @@ export function buildStatus(projectRoot: string, agentName: string): string {
         count = content.trim().split("\n").filter(line => line.trim()).length
       }
     }
+    totalEntries += count
     if (count > 0) parts.push(`${name}: ${count}`)
   }
 
@@ -63,10 +67,17 @@ export function buildStatus(projectRoot: string, agentName: string): string {
   if (existsSync(archivedPath)) {
     const content = readFileSync(archivedPath, "utf-8")
     const count = content.trim().split("\n").filter(line => line.trim()).length
+    totalEntries += count
     if (count > 0) parts.push(`archived: ${count}`)
   }
 
-  lines.push(`Volumes: ${parts.length > 0 ? parts.join(", ") : "empty"}`)
+  if (totalEntries === 0) {
+    lines.push("Memory: empty (no entries yet)")
+    lines.push("")
+    lines.push("This appears to be a fresh install. If you are the primary agent, enter wizard mode: greet the user, read stellario.yaml together, and help them configure their memory system.")
+  } else {
+    lines.push(`Volumes: ${parts.join(", ")}`)
+  }
 
   // ── Active workspace ──
   const workspaceVol = getWorkspaceVolume(config)
@@ -144,6 +155,23 @@ export function buildStatus(projectRoot: string, agentName: string): string {
         const taskRef = lock.task_id ? ` \u2192 ${lock.task_id}` : ""
         lines.push(`  \U0001f512 ${lock.path} (${lock.agent}, ${age})${taskRef}`)
       }
+    }
+  }
+
+  // ── Linked external volumes ──
+  const linked = getLinkedVolumes(memDir, agentName)
+  if (linked.length > 0) {
+    lines.push("")
+    lines.push("\u2500\u2500\u2500")
+    lines.push("Linked volumes:")
+    for (const lv of linked) {
+      let count = 0
+      try {
+        const symlinkPath = getLinkedVolumeSymlinkPath(memDir, lv.alias)
+        const content = readFileSync(symlinkPath, "utf-8")
+        count = content.trim().split("\n").filter(l => l.trim()).length
+      } catch { /* broken symlink */ }
+      lines.push(`  ${lv.alias} ← ${lv.source_volume} @ ${basename(lv.source_project)} (${count} entries, readonly)`)
     }
   }
 
@@ -403,7 +431,7 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
       if (!canWrite(agent, volume, ctx.config)) {
         return `\u274c Agent "${agent}" cannot write to volume "${volume}".`
       }
-      if (entry.author !== agent) {
+      if (!isAuthor(agent, entry.author || "")) {
         return `\u274c Only the author can edit. (author: ${entry.author || "unknown"})`
       }
 
@@ -469,7 +497,7 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
       if (!canWrite(agent, volume, ctx.config)) {
         return `\u274c Agent "${agent}" cannot write to volume "${volume}".`
       }
-      if (entry.author !== agent) {
+      if (!isAuthor(agent, entry.author || "")) {
         return `\u274c Only the author can modify this theme. (author: ${entry.author || "unknown"})`
       }
 
@@ -541,7 +569,7 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
       if (!canWrite(agent, volume, ctx.config)) {
         return `\u274c Agent "${agent}" cannot write to volume "${volume}".`
       }
-      if (entry.author !== agent) {
+      if (!isAuthor(agent, entry.author || "")) {
         return `\u274c Only the author can modify this theme. (author: ${entry.author || "unknown"})`
       }
 

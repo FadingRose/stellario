@@ -1,9 +1,57 @@
-# Stellario — Software Development Config
-# 6 volumes, 3 agents
+# ╭───────────────────────────────────────────────────────────────────────────╮
+# │  Stellario — Software Development Config                                │
+# │                                                                          │
+# │  6 volumes, 3 agents. Designed for software projects with               │
+# │  a lead agent, a research/analysis subagent, and an execution subagent.  │
+# │                                                                          │
+# │  Every field is commented so you (and your agents) can understand and    │
+# │  modify this config without reading external docs.                       │
+# ╰───────────────────────────────────────────────────────────────────────────╯
 
+# Where memory data lives (relative to project root).
 memoryDir: ".opencode/.stellario"
 
+# ── Volumes ────────────────────────────────────────────────────────────────
+#
+# A volume is a named container for memory entries. Each volume has a
+# "profile" that determines how entries behave, and "boundaries" that
+# control which agents can access it.
+#
+# Profiles:
+#   mutable    — Entries can be created, edited, and archived.
+#                Use for: evolving knowledge, design decisions, notes.
+#                Entries get stable IDs like "a01", "a02", tracked in git.
+#
+#   append     — Entries can be created but never edited or deleted.
+#                Use for: handoff logs, session records, audit trails.
+#                Once written, it's permanent.
+#
+#   scratch    — Like mutable, but NOT tracked in git.
+#                Use for: drafts, experiments, throwaway notes.
+#                Entries get random IDs like "d7f3a". Gone if file is deleted.
+#
+#   frozen     — Completely read-only. No creation, no edits, no deletion.
+#                Use for: the archive volume where forgotten entries land.
+#                You should always have one "archived" volume with this profile.
+#
+#   workspace  — Like mutable, but also tracks which entry is "active".
+#                Use for: the agent's current task context.
+#                Only ONE workspace volume allowed per project.
+#
+# Authority (optional semantic label — does NOT affect behavior):
+#   source      — Raw material from external input (conversations, data)
+#   curated     — Human-judged, high-value knowledge (decisions, conventions)
+#   synthesized — Agent-derived, can be regenerated (summaries, patterns)
+#
+# Boundaries:
+#   write: [agent1, agent2]  — which agents can create/edit entries
+#   read:  [agent1, agent2]  — which agents can view entries
+#   Use [all] to grant access to every defined agent.
+
 volumes:
+  # meta: behavioral calibrations and dynamic prompts.
+  #   Entries here with tag "type:prompt" are injected into the agent's
+  #   system context on session startup. Use for cross-session instructions.
   meta:
     profile: mutable
     boundaries:
@@ -11,6 +59,9 @@ volumes:
       read: [stellario]
     authority: curated
     idPrefix: "m"
+
+  # active: the main knowledge base. Design decisions, conventions, notes.
+  #   Readable by all agents so subagents can access project context.
   active:
     profile: mutable
     boundaries:
@@ -18,6 +69,9 @@ volumes:
       read: [all]
     authority: curated
     idPrefix: "a"
+
+  # handover: session handoff logs. Immutable once written.
+  #   The analyst subagent can read these to recover context.
   handover:
     profile: append
     boundaries:
@@ -25,6 +79,9 @@ volumes:
       read: [stellario, analyst]
     authority: curated
     idPrefix: "h"
+
+  # layer: the active workspace. Tracks what the agent is currently focused on.
+  #   Both stellario and analyst can write here for collaborative work.
   layer:
     profile: workspace
     boundaries:
@@ -32,6 +89,9 @@ volumes:
       read: [stellario, analyst]
     authority: curated
     idPrefix: "l"
+
+  # drafting: temporary working material. Not git-tracked.
+  #   The executor subagent uses this for code drafts and experiments.
   drafting:
     profile: scratch
     boundaries:
@@ -39,10 +99,22 @@ volumes:
       read: [stellario, analyst, executor]
     authority: curated
     idPrefix: "d"
+
+  # archived: where forgotten entries go. Read-only.
   archived:
     profile: frozen
     boundaries:
       read: [all]
+
+# ── Agents ─────────────────────────────────────────────────────────────────
+#
+# Each agent is a persona that can interact with memory volumes.
+#   display: human-readable name (shown in tool output and errors)
+#   role:    "primary" = user-facing, can use task/edit/bash tools
+#            "subagent" = dispatched internally by the primary agent
+#
+# The first agent listed is treated as the project lead.
+# Agent names are used in volume boundaries above.
 
 agents:
   stellario:
@@ -55,11 +127,20 @@ agents:
     display: "Executor"
     role: subagent
 
+# ── Tags ───────────────────────────────────────────────────────────────────
+#
+# Structured categorization for entries. Tags use "namespace:value" format.
+#   namespaces: allowed tag prefixes (informational, not enforced at engine level)
+#   typeValues: closed vocabulary for type:* tags (helps agents pick the right tag)
+#
+# Examples: type:design, module:storage, feature:auth, file:src/store.ts
+
 tags:
   namespaces: [module, feature, crate, file, type]
   typeValues: [handoff, design, adr, convention, layer, polish, bug, investigation]
 
-# Semantic search configuration (optional)
+# ── Semantic Search (optional) ────────────────────────────────────────────
+#
 # embedding:
-#   enabled: auto       # auto | true | false
-#   model: "Xenova/all-MiniLM-L6-v2"
+#   enabled: auto                          # auto (probe at runtime) | true | false
+#   model: "Xenova/all-MiniLM-L6-v2"      # embedding model (~22MB, runs locally)

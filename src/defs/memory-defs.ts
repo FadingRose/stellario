@@ -545,13 +545,13 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
     },
   }
 
-  // ─── link: create a manual reference between entries ───────────────────────
+  // ─── ref: create a manual reference between entries ───────────────────────
 
-  const link: ToolDef = {
+  const ref: ToolDef = {
     description:
       "Create a manual reference from one entry to another. " +
       "Manual refs are permanent — the auto_refs engine never removes them. " +
-      "If the target was previously unlinked (in refs_removed), it is restored.",
+      "If the target was previously unref'd (in refs_removed), it is restored.",
     args: {
       id: z.string().describe("Source entry ID to link from."),
       target: z.string().describe("Target entry ID to link to."),
@@ -611,32 +611,32 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
 
       const commitHash = gitCommit(
         ctx.memDir, volume,
-        `link: ${args.id} → ${args.target}\n\nReason: ${args.reason}`,
+        `ref: ${args.id} → ${args.target}\n\nReason: ${args.reason}`,
         ctx.config, [args.id],
       )
 
       return [
-        `Linked [${args.id}] → [${args.target}]`,
+        `Ref'd [${args.id}] → [${args.target}]`,
         `Reason: ${args.reason}`,
         commitHash ? `Commit: ${commitHash}` : "",
       ].filter(Boolean).join("\n")
     },
   }
 
-  // ─── unlink: remove a reference between entries ────────────────────────────
+  // ─── unref: remove a reference between entries ────────────────────────────
 
-  const unlink: ToolDef = {
+  const unref: ToolDef = {
     description:
       "Remove a reference from one entry to another. " +
-      "For auto links (source:'auto'): both sides are removed, and the target " +
+      "For auto refs (source:'auto'): both sides are removed, and the target " +
       "is added to refs_removed to prevent auto_re-linking. " +
-      "For manual links (source:'manual'): only the specified link is removed.",
+      "For manual refs (source:'manual'): only the specified ref is removed.",
     args: {
-      id: z.string().describe("Entry ID to remove a link from."),
-      target: z.string().describe("Target entry ID to unlink."),
+      id: z.string().describe("Entry ID to remove a ref from."),
+      target: z.string().describe("Target entry ID to unref."),
     },
     async execute(args, context: ToolContext) {
-      if (!args.id || !args.target) return "\u274c unlink requires 'id' and 'target'."
+      if (!args.id || !args.target) return "\u274c unref requires 'id' and 'target'."
 
       const ctx = resolveContext(context)
       const agent = resolveAgent(context.agent, ctx.config)
@@ -655,11 +655,11 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
 
       const refIdx = source.refs?.findIndex(r => r.target === args.target) ?? -1
       if (refIdx === -1) {
-        // Already unlinked — check refs_removed
+        // Already unref'd — check refs_removed
         if (source.refs_removed?.includes(args.target)) {
-          return `\u274c [${args.id}] is already unlinked from [${args.target}].`
+          return `\u274c [${args.id}] is already unref'd from [${args.target}].`
         }
-        return `\u274c No link from [${args.id}] to [${args.target}].`
+        return `\u274c No ref from [${args.id}] to [${args.target}].`
       }
 
       const ref = source.refs![refIdx]
@@ -671,7 +671,7 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         if (!source.refs_removed) source.refs_removed = []
         source.refs_removed.push(args.target)
 
-        // Remove reverse auto link from target (CL-10)
+        // Remove reverse auto ref from target (CL-10)
         const target = entries.find(e => e.id === args.target)
         if (target?.refs) {
           target.refs = target.refs.filter(
@@ -696,17 +696,17 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
 
       const commitHash = gitCommit(
         ctx.memDir, volume,
-        `unlink: ${args.id} ⊥ ${args.target}`,
+        `unref: ${args.id} ⊥ ${args.target}`,
         ctx.config, changedIds,
       )
 
       const refType = ref.source === "auto" ? "auto (bidirectional)" : "manual"
       return [
-        `Unlinked [${args.id}] ⊥ [${args.target}] (${refType})`,
+        `Unref'd [${args.id}] ⊥ [${args.target}] (${refType})`,
         commitHash ? `Commit: ${commitHash}` : "",
       ].filter(Boolean).join("\n")
     },
   }
 
-  return { create, show, revise, forget, history, meta, link, unlink }
+  return { create, show, revise, forget, history, meta, ref, unref }
 }

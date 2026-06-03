@@ -145,6 +145,22 @@ export interface VolumeIndexEntry {
   next_nonce: number     // next available nonce for ID generation
   active_workspace?: string              // legacy: single global active entry (migrated to map on read)
   active_workspaces?: Record<string, string>  // per-agent: { agentName: entryId }
+  linked_volumes?: Record<string, LinkedVolume[]>  // per-agent: external volumes linked into context
+}
+
+/**
+ * An external volume linked into the agent's working context.
+ * Points to another stellario project's volume via symlink.
+ */
+export interface LinkedVolume {
+  /** Local alias for the linked volume (must be unique within agent's context). */
+  alias: string
+  /** Absolute path to the external project root. */
+  source_project: string
+  /** Volume name in the external project's stellario.yaml. */
+  source_volume: string
+  /** ISO 8601 timestamp when the link was created. */
+  linked_at: string
 }
 
 // ─── Tool Context ───────────────────────────────────────────────────────────

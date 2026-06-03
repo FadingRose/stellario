@@ -61,7 +61,6 @@ export async function probeEmbeddingAvailability(): Promise<boolean> {
   if (_availability === "unavailable" || _availability === "disabled") return false
 
   try {
-    // @ts-expect-error — optional dependency, dynamically imported
     const { pipeline: createPipeline } = await import("@huggingface/transformers")
     _availability = "available"
     return true
@@ -107,9 +106,8 @@ async function ensureModel(): Promise<any> {
   }
 
   try {
-    // @ts-expect-error — optional dependency, dynamically imported
     const { pipeline: createPipeline } = await import("@huggingface/transformers")
-    pipeline = await createPipeline("feature-extraction", modelId, { quantized: true })
+    pipeline = await createPipeline("feature-extraction", modelId)
     modelReady = true
     _availability = "available"
     return pipeline
@@ -317,14 +315,19 @@ export interface SemanticResult {
 /**
  * Semantic search: embed query and find closest keyword vectors.
  * Returns entry IDs ranked by best keyword match score.
+ * Optionally includes extra index entries (e.g., from linked external volumes).
  */
 export async function semanticSearch(
   memDir: string,
   query: string,
   limit: number = 20,
+  extraIndex?: KeywordIndexEntry[],
 ): Promise<SemanticResult[]> {
   const queryVector = await embed(query)
-  const index = readIndex(memDir)
+  const localIndex = readIndex(memDir)
+  const index = extraIndex && extraIndex.length > 0
+    ? [...localIndex, ...extraIndex]
+    : localIndex
 
   if (index.length === 0) return []
 

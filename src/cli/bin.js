@@ -27,6 +27,8 @@ export const revise  = tool(defs.revise)
 export const forget  = tool(defs.forget)
 export const history = tool(defs.history)
 export const meta    = tool(defs.meta)
+export const ref     = tool(defs.ref)
+export const unref   = tool(defs.unref)
 `
 
 const TELESCOPE_GLUE = `import { tool } from "@opencode-ai/plugin"
@@ -48,6 +50,16 @@ export const open     = tool(defs.open)
 export const edit     = tool(defs.edit)
 export const add      = tool(defs.add)
 export const remove   = tool(defs.remove)
+`
+
+const VOLUME_LINK_GLUE = `import { tool } from "@opencode-ai/plugin"
+import { getVolumeLinkDefs } from "stellario/defs/volume-link"
+
+const defs = getVolumeLinkDefs()
+
+export const discover  = tool(defs.discover)
+export const link      = tool(defs.link)
+export const unlink    = tool(defs.unlink)
 `
 
 const INJECTOR_PLUGIN = `import type { Plugin } from "@opencode-ai/plugin"
@@ -218,6 +230,7 @@ mkdirSync(toolsDir, { recursive: true })
 writeGlue(toolsDir, "stellario-memory.ts", MEMORY_GLUE)
 writeGlue(toolsDir, "stellario-telescope.ts", TELESCOPE_GLUE)
 writeGlue(toolsDir, "stellario-workspace.ts", WORKSPACE_GLUE)
+writeGlue(toolsDir, "stellario-volume-link.ts", VOLUME_LINK_GLUE)
 
 // ── 5b. Plugin injector ─────────────────────────────────────────────────────
 
@@ -230,9 +243,10 @@ writeGlue(pluginDir, "stellario-inject.ts", INJECTOR_PLUGIN)
 const agentsDir = join(opencodeDir, "agents")
 mkdirSync(agentsDir, { recursive: true })
 
-const memoryTools = ["stellario-memory_create", "stellario-memory_show", "stellario-memory_revise", "stellario-memory_forget", "stellario-memory_history", "stellario-memory_meta"]
+const memoryTools = ["stellario-memory_create", "stellario-memory_show", "stellario-memory_revise", "stellario-memory_forget", "stellario-memory_history", "stellario-memory_meta", "stellario-memory_ref", "stellario-memory_unref"]
 const searchTools = ["stellario-telescope_search"]
 const workspaceTools = ["stellario-workspace_status", "stellario-workspace_assemble", "stellario-workspace_open", "stellario-workspace_edit", "stellario-workspace_add", "stellario-workspace_remove"]
+const volumeLinkTools = ["stellario-volume-link_discover", "stellario-volume-link_link", "stellario-volume-link_unlink"]
 
 for (const agent of agents) {
   const agentPath = join(agentsDir, `${agent}.md`)
@@ -274,16 +288,57 @@ for (const agent of agents) {
   }
   agentTools.push(...searchTools.map(t => `  ${t}: true`))
   agentTools.push(...workspaceTools.map(t => `  ${t}: true`))
+  agentTools.push(...volumeLinkTools.map(t => `  ${t}: true`))
 
   const toolsYaml = agentTools.join("\n")
 
   const agentBody = isPrimary
     ? `# ${display}
 
-Your operational context is auto-injected from memory via plugin.
+You are a memory-aware agent powered by Stellario. You manage structured, version-controlled memory across sessions.
+
+## Startup Behavior
+
+Your operational context is auto-injected via plugin on session start. The injected status shows:
+- Volume stats (how many entries each volume has)
+- Active workspace (what you're currently focused on)
+- Latest handover (session recovery context)
+- Dynamic prompts from the meta volume (type:prompt entries)
+
 If the plugin is not active, call workspace_status to bootstrap.
 
-Volumes: ${accessibleVolumes.join(", ")}`
+## When Memory Is Empty
+
+If you see "Memory: empty" in the injected status, this is a fresh install. Enter **wizard mode**:
+
+1. Greet the user warmly. Explain that you'll help them set up their memory system.
+2. Read stellario.yaml together — the comments in the file explain every option.
+3. Ask the user about their project: what they're building, what kind of memory they need.
+4. Help them adjust volumes, agents, and permissions to fit their workflow.
+5. Help them write their introduction (see below).
+6. Create their first memory entries to demonstrate how the system works.
+
+## User Introduction
+
+The section below captures what you learn about the user. Fill it in during your first conversation and update it whenever the user's needs change. This is your primary way to personalize your behavior.
+
+<!-- INTRODUCTION_START -->
+## About the User
+
+*(Not yet filled in. Ask the user about themselves during your first conversation.)*
+<!-- INTRODUCTION_END -->
+
+## Memory Philosophy
+
+- Write to memory when you learn something worth remembering across sessions.
+- Use the \`meta\` tool for behavioral calibrations (they're injected as prompts).
+- Use \`handover\` (append volume) to leave session notes for your future self.
+- Use \`drafting\` (scratch volume) for temporary material that may be discarded.
+- Use \`workspace_assemble\` to gather related entries when working on a theme.
+
+## Available Volumes
+
+${accessibleVolumes.map(v => `- ${v}`).join("\n")}`
     : `# ${display}
 
 Volumes: ${accessibleVolumes.join(", ")}

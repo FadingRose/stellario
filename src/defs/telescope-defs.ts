@@ -1,16 +1,20 @@
 import { z } from "zod"
-import type { ToolContext, MemoryEntry, ToolDef } from "../types.js"
+import type { ToolContext, MemoryEntry, ToolDef, LinkedVolume } from "../types.js"
 import { resolveContext } from "../context.js"
 import { resolveAgent, canRead } from "../permissions.js"
-import { readJsonl, extractTitle, truncate, ensureStringArray } from "../store.js"
+import { readJsonl, extractTitle, truncate, ensureStringArray, getLinkedVolumes } from "../store.js"
 import {
   probeEmbeddingAvailability,
   semanticSearch,
   rebuildIndex,
   indexExists,
   setModelId,
+  readIndex,
+  type KeywordIndexEntry,
 } from "../embedding.js"
-import { existsSync } from "fs"
+import { readLinkedVolume } from "./volume-link-defs.ts"
+import { existsSync, readFileSync, readlinkSync } from "fs"
+import { join } from "path"
 
 // =============================================================================
 // Search Engine
@@ -145,6 +149,47 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
         }
       }
 
+      // ── Include linked external volumes ──
+      const linked = getLinkedVolumes(ctx.memDir, agent)
+      const linkedAliases: string[] = []
+      for (const lv of linked) {
+        try {
+          const entries = readLinkedVolume(ctx.memDir, lv.alias)
+          for (const entry of entries) {
+            allEntries.push({ entry, volume: `linked:${lv.alias}` })
+          }
+          if (entries.length > 0) linkedAliases.push(lv.alias)
+        } catch {
+          // Broken symlink — skip
+        }
+      }
+
+      // ── Merge external keyword indices for semantic search ──
+      // Linked volumes have their keyword vectors in the external project's memDir.
+      // We read them and make them available to semanticSearch via a merged approach.
+      const linkedKeywordIndices: KeywordIndexEntry[] = []
+      for (const lv of linked) {
+        try {
+          // The symlink points to {extMemDir}/{volume}.jsonl
+          // Keywords index lives at {extMemDir}/keywords-index.jsonl
+          // We resolve the external memDir by following the symlink's directory
+          const symlinkPath = join(ctx.memDir, "linked", `${lv.alias}.jsonl`)
+          const targetPath = readlinkSync(symlinkPath)
+          const extMemDir = join(targetPath, "..") // parent of {volume}.jsonl
+          const extIndexPath = join(extMemDir, "keywords-index.jsonl")
+          if (existsSync(extIndexPath)) {
+            const content = readFileSync(extIndexPath, "utf-8")
+            if (content.trim()) {
+              for (const line of content.split("\n").filter(l => l.trim())) {
+                linkedKeywordIndices.push(JSON.parse(line) as KeywordIndexEntry)
+              }
+            }
+          }
+        } catch {
+          // Best effort
+        }
+      }
+
       // Tag enumeration mode
       if (args.returns === "tags") {
         const tagCounts = new Map<string, number>()
@@ -184,7 +229,7 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
             }
 
             try {
-              const semResults = await semanticSearch(ctx.memDir, args.query, (args.limit || 50) * 2)
+              const semResults = await semanticSearch(ctx.memDir, args.query, (args.limit || 50) * 2, linkedKeywordIndices.length > 0 ? linkedKeywordIndices : undefined)
               if (semResults.length > 0) {
                 // Build keyword scores from semantic results
                 const kwScores = new Map<string, number>()
@@ -263,7 +308,7 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
 
           try {
             const query = terms.join(" ").slice(0, 50)
-            const semResults = await semanticSearch(ctx.memDir, query, allEntries.length * 2)
+            const semResults = await semanticSearch(ctx.memDir, query, allEntries.length * 2, linkedKeywordIndices.length > 0 ? linkedKeywordIndices : undefined)
             for (const r of semResults) {
               // Normalize semantic score to [0, 10] range
               const normalized = r.score * 10

@@ -14,6 +14,7 @@
     "./defs/telescope": "./src/defs/telescope-defs.ts",
     "./defs/workspace": "./src/defs/workspace-defs.ts",
     "./defs/coordination": "./src/defs/coordination-defs.ts",
+    "./defs/volume-link": "./src/defs/volume-link-defs.ts",
     "./config": "./src/config.ts",
     "./store": "./src/store.ts",
     "./permissions": "./src/permissions.ts",
@@ -31,7 +32,8 @@
   "devDependencies": {
     "@types/node": "^25.9.1",
     "tsx": "^4.22.3",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "vitest": "^4.1.8"
   },
   "keywords": [
     "opencode",

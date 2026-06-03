@@ -191,4 +191,8 @@ console.log("═".repeat(50))
 console.log(`Results: ${passed} passed, ${failed} failed`)
 console.log("═".repeat(50))
 
-process.exit(failed > 0 ? 1 : 0)
+// Note: Do not call process.exit() — vitest treats it as a suite failure.
+// The test assertions above already cover correctness.
+if (failed > 0) {
+  throw new Error(`${failed} embedding test(s) failed`)
+}

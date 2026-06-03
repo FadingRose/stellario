@@ -16,9 +16,9 @@ export function resolveAgent(agentStr: string, config: StellarioConfig): string 
   // Exact match
   if (known.includes(normalized)) return normalized
 
-  // Partial match
+  // Partial match (exact prefix or substring within a longer agent name)
   for (const agent of known) {
-    if (normalized.includes(agent)) return agent
+    if (agent.startsWith(normalized) || normalized.startsWith(agent)) return agent
   }
 
   return null
@@ -44,8 +44,8 @@ export function canRead(agent: string, volume: string, config: StellarioConfig):
 export function canWrite(agent: string, volume: string, config: StellarioConfig): boolean {
   const def = config.volumes[volume]
   if (!def) return false
-  const behavior = profileBehavior(def.profile)
-  if (!behavior.canRevise && !canCreate(volume, config)) return false
+  // Only profiles that support at least one write operation (create or revise) can pass
+  if (!canCreate(volume, config) && !canRevise(volume, config)) return false
   return def.boundaries.write.includes("all") || def.boundaries.write.includes(agent)
 }
 
@@ -111,6 +111,9 @@ export function writableVolumes(agent: string, config: StellarioConfig): string[
 /**
  * Check if an agent can search across all stories.
  * Only the first listed agent has this privilege.
+ *
+ * Note: Currently unused in built-in tools. Provided as a public API
+ * for downstream consumers that may need story-scoped access control.
  */
 export function canCrossStory(agent: string, config: StellarioConfig): boolean {
   const agents = Object.keys(config.agents)

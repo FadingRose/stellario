@@ -481,3 +481,104 @@ export function removeEntryMd(memDir: string, volume: string, id: string): void 
 export function getEntryMdPath(volume: string, id: string): string {
   return `.track/${volume}/${id}.md`
 }
+
+// =============================================================================
+// Linked Volumes (external volume binding)
+// =============================================================================
+
+import type { LinkedVolume } from "./types.js"
+
+/**
+ * Get linked volumes for a specific agent.
+ */
+export function getLinkedVolumes(
+  memDir: string,
+  agent: string,
+): LinkedVolume[] {
+  const index = readVolumeIndex(memDir)
+  for (const entry of index) {
+    if (entry.linked_volumes?.[agent]) {
+      return entry.linked_volumes[agent]
+    }
+  }
+  return []
+}
+
+/**
+ * Set linked volumes for a specific agent.
+ * Stores on the first volume index entry (any entry works; it's per-agent).
+ */
+export function setLinkedVolumes(
+  memDir: string,
+  agent: string,
+  linked: LinkedVolume[],
+): void {
+  const index = readVolumeIndex(memDir)
+
+  // Find or create an entry to store linked_volumes on
+  let entry = index[0]
+  if (!entry) {
+    // No index entries yet — create a placeholder
+    entry = {
+      volume: "_meta",
+      files: [],
+      next_nonce: 0,
+    }
+    index.push(entry)
+  }
+
+  if (!entry.linked_volumes) entry.linked_volumes = {}
+  entry.linked_volumes[agent] = linked
+
+  writeVolumeIndex(memDir, index)
+}
+
+/**
+ * Add a linked volume for an agent.
+ * Returns false if alias already exists.
+ */
+export function addLinkedVolume(
+  memDir: string,
+  agent: string,
+  link: LinkedVolume,
+): boolean {
+  const linked = getLinkedVolumes(memDir, agent)
+  if (linked.some(l => l.alias === link.alias)) return false
+  linked.push(link)
+  setLinkedVolumes(memDir, agent, linked)
+  return true
+}
+
+/**
+ * Remove a linked volume by alias for an agent.
+ * Returns the removed link, or null if not found.
+ */
+export function removeLinkedVolume(
+  memDir: string,
+  agent: string,
+  alias: string,
+): LinkedVolume | null {
+  const linked = getLinkedVolumes(memDir, agent)
+  const idx = linked.findIndex(l => l.alias === alias)
+  if (idx === -1) return null
+  const removed = linked.splice(idx, 1)[0]
+  setLinkedVolumes(memDir, agent, linked)
+  return removed
+}
+
+/**
+ * Get the symlink path for a linked volume's JSONL data file.
+ */
+export function getLinkedVolumeSymlinkPath(
+  memDir: string,
+  alias: string,
+): string {
+  return join(memDir, "linked", `${alias}.jsonl`)
+}
+
+/**
+ * Get the directory for linked volume symlinks.
+ */
+export function getLinkedVolumesDir(memDir: string): string {
+  return join(memDir, "linked")
+}

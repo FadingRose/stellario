@@ -1,7 +1,46 @@
-# Stellario — Minimal Config
-# For simple projects with a single agent
+# ╭───────────────────────────────────────────────────────────────────────────╮
+# │  Stellario — Memory Configuration                                       │
+# │                                                                          │
+# │  This file defines how your AI agents remember things across sessions.   │
+# │  Every field is commented so you (and your agents) can understand and    │
+# │  modify this config without reading external docs.                       │
+# ╰───────────────────────────────────────────────────────────────────────────╯
 
+# Where memory data lives (relative to project root).
+# You rarely need to change this.
 memoryDir: ".opencode/.stellario"
+
+# ── Volumes ────────────────────────────────────────────────────────────────
+#
+# A volume is a named container for memory entries. Each volume has a
+# "profile" that determines how entries behave, and "boundaries" that
+# control which agents can access it.
+#
+# Profiles:
+#   mutable    — Entries can be created, edited, and archived.
+#                Use for: evolving knowledge, design decisions, notes.
+#                Entries get stable IDs like "a01", "a02", tracked in git.
+#
+#   append     — Entries can be created but never edited or deleted.
+#                Use for: handoff logs, session records, audit trails.
+#                Once written, it's permanent.
+#
+#   scratch    — Like mutable, but NOT tracked in git.
+#                Use for: drafts, experiments, throwaway notes.
+#                Entries get random IDs like "d7f3a". Gone if file is deleted.
+#
+#   frozen     — Completely read-only. No creation, no edits, no deletion.
+#                Use for: the archive volume where forgotten entries land.
+#                You should always have one "archived" volume with this profile.
+#
+#   workspace  — Like mutable, but also tracks which entry is "active".
+#                Use for: the agent's current task context.
+#                Only ONE workspace volume allowed per project.
+#
+# Boundaries:
+#   write: [agent1, agent2]  — which agents can create/edit entries
+#   read:  [agent1, agent2]  — which agents can view entries
+#   Use [all] to grant access to every defined agent.
 
 volumes:
   active:
@@ -9,28 +48,53 @@ volumes:
     boundaries:
       write: [stellario]
       read: [all]
+
   handover:
     profile: append
     boundaries:
       write: [stellario]
       read: [stellario]
+
   drafting:
     profile: scratch
     boundaries:
       write: [stellario]
       read: [stellario]
+
   workspace:
     profile: workspace
     boundaries:
       write: [stellario]
       read: [stellario]
 
+  archived:
+    profile: frozen
+    boundaries:
+      read: [all]
+
+# ── Agents ─────────────────────────────────────────────────────────────────
+#
+# Each agent is a persona that can interact with memory volumes.
+#   display: human-readable name (shown in tool output and errors)
+#   role:    "primary" = user-facing, can use task/edit/bash tools
+#            "subagent" = dispatched internally by the primary agent
+#
+# The first agent listed is treated as the project lead.
+# Agent names are used in volume boundaries above.
+
 agents:
   stellario:
     display: "Stellario"
     role: primary
 
-# Semantic search configuration (optional)
+# ── Tags (optional) ───────────────────────────────────────────────────────
+#
+# tags:
+#   namespaces: [module, feature, type]    # allowed tag prefixes (namespace:value)
+#   typeValues: [handoff, design, adr]     # closed vocabulary for type:* tags
+
+# ── Semantic Search (optional) ────────────────────────────────────────────
+#
 # embedding:
-#   enabled: auto       # auto | true | false
-#   model: "Xenova/all-MiniLM-L6-v2"
+#   enabled: auto                          # auto (probe at runtime) | true | false
+#   model: "Xenova/all-MiniLM-L6-v2"      # embedding model (~22MB, runs locally)
