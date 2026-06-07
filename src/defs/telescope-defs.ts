@@ -114,6 +114,8 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
         .describe("Max results (default 20)."),
       returns: z.enum(["entries", "tags", "keywords"]).optional()
         .describe("What to return. 'entries' (default), 'tags' (enumerate tag values), 'keywords' (enumerate keywords)."),
+      author: z.string().optional()
+        .describe("Filter by entry author (exact match, case-insensitive)."),
     },
     async execute(args, context: ToolContext) {
       // Defensive: opencode may pass array params as JSON strings
@@ -121,6 +123,8 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
       const queryTags = ensureStringArray(args.tags)
       const queryTagsAny = ensureStringArray(args.tags_any)
       const queryTagsNot = ensureStringArray(args.tags_not)
+
+      const queryAuthor = args.author?.trim().toLowerCase() || undefined
 
       const ctx = resolveContext(context)
       const agent = resolveAgent(context.agent, ctx.config)
@@ -142,7 +146,7 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
         ? queryVolumes.filter(v => readable.includes(v) || (v === "archived" && canReadArchived))
         : [...readable, ...(canReadArchived ? ["archived"] : [])]
 
-      const allEntries: Array<{ entry: MemoryEntry; volume: string }> = []
+      let allEntries: Array<{ entry: MemoryEntry; volume: string }> = []
       for (const vol of searchableVolumes) {
         for (const entry of readJsonl(ctx.memDir, vol)) {
           allEntries.push({ entry, volume: vol })
@@ -188,6 +192,13 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
         } catch {
           // Best effort
         }
+      }
+
+      // ── Author filter (applies to all modes) ──
+      if (queryAuthor) {
+        allEntries = allEntries.filter(({ entry }) =>
+          entry.author?.toLowerCase() === queryAuthor
+        )
       }
 
       // Tag enumeration mode
