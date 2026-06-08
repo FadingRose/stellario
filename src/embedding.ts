@@ -107,7 +107,7 @@ async function ensureModel(): Promise<any> {
 
   try {
     const { pipeline: createPipeline } = await import("@huggingface/transformers")
-    pipeline = await createPipeline("feature-extraction", modelId)
+    pipeline = await createPipeline("feature-extraction", modelId, { dtype: "fp32" })
     modelReady = true
     _availability = "available"
     return pipeline
