@@ -477,7 +477,23 @@ if (needsInstall) {
   }
 }
 
-// ── 8. .gitignore ──────────────────────────────────────────────────────────
+// ── 8. Embedding model pre-download ──────────────────────────────────────────
+
+if (needsInstall) {
+  console.log("")
+  console.log("Pre-downloading embedding model (~22MB, one-time)...")
+  try {
+    execSync(
+      `node --input-type=module -e "import { pipeline } from '@huggingface/transformers'; await pipeline('feature-extraction','Xenova/all-MiniLM-L6-v2',{dtype:'fp32'}); console.log('ok')"`,
+      { cwd: opencodeDir, stdio: "pipe", timeout: 180000 }
+    )
+    console.log("✓ Embedding model ready")
+  } catch {
+    console.log("⚠  Model download skipped — will retry on first search")
+  }
+}
+
+// ── 9. .gitignore ───────────────────────────────────────────────────────────
 
 const gitignorePath = join(projectRoot, ".gitignore")
 if (existsSync(gitignorePath)) {
