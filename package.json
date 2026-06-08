@@ -1,6 +1,6 @@
 {
   "name": "stellario",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Agent memory infrastructure — Volume-based knowledge management for opencode",
   "type": "module",
   "main": "src/index.ts",
@@ -44,6 +44,7 @@
   "license": "MIT",
   "files": [
     "src/",
+    "glue/",
     "templates/"
   ],
   "repository": {

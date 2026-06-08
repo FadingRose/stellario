@@ -14,70 +14,14 @@ const __dirname = dirname(__filename)
 const TEMPLATES = ["minimal", "novel", "software", "audit"]
 const STELLARIO_REPO = "github:FadingRose/stellario"
 
-// ── Glue Templates (must be before main logic) ─────────────────────────────
-
-const MEMORY_GLUE = `import { tool } from "@opencode-ai/plugin"
-import { getMemoryToolDefs } from "stellario/defs/memory"
-
-const defs = getMemoryToolDefs()
-
-export const create  = tool(defs.create)
-export const show    = tool(defs.show)
-export const revise  = tool(defs.revise)
-export const forget  = tool(defs.forget)
-export const history = tool(defs.history)
-export const meta    = tool(defs.meta)
-export const ref     = tool(defs.ref)
-export const unref   = tool(defs.unref)
-`
-
-const TELESCOPE_GLUE = `import { tool } from "@opencode-ai/plugin"
-import { getTelescopeToolDefs } from "stellario/defs/telescope"
-
-const defs = getTelescopeToolDefs()
-
-export const search = tool(defs.search)
-`
-
-const WORKSPACE_GLUE = `import { tool } from "@opencode-ai/plugin"
-import { getWorkspaceToolDefs } from "stellario/defs/workspace"
-
-const defs = getWorkspaceToolDefs()
-
-export const status   = tool(defs.status)
-export const assemble = tool(defs.assemble)
-export const open     = tool(defs.open)
-export const edit     = tool(defs.edit)
-export const add      = tool(defs.add)
-export const remove   = tool(defs.remove)
-`
-
-const VOLUME_LINK_GLUE = `import { tool } from "@opencode-ai/plugin"
-import { getVolumeLinkDefs } from "stellario/defs/volume-link"
-
-const defs = getVolumeLinkDefs()
-
-export const discover  = tool(defs.discover)
-export const link      = tool(defs.link)
-export const unlink    = tool(defs.unlink)
-`
-
-const INJECTOR_PLUGIN = `import type { Plugin } from "@opencode-ai/plugin"
-import { buildStatus } from "stellario/defs/workspace"
-
-export default (async ({ directory }) => {
-  return {
-    "experimental.chat.system.transform": async (_input, output) => {
-      try {
-        const status = buildStatus(directory, "stellario")
-        output.system.push(status)
-      } catch {
-        // Memory not initialized yet — silently skip
-      }
-    },
-  }
-}) satisfies Plugin
-`
+// Glue files are shipped in glue/ directory — no inline templates needed.
+// Mapping: glue source filename → target filename in .opencode/tools/
+const GLUE_FILES = {
+  "memory.ts": "stellario-memory.ts",
+  "telescope.ts": "stellario-telescope.ts",
+  "workspace.ts": "stellario-workspace.ts",
+  "volume-link.ts": "stellario-volume-link.ts",
+}
 
 // ── Main ──────────────────────────────────────────────────────────────────
 
@@ -222,21 +166,35 @@ if (!existsSync(pkgPath)) {
   }
 }
 
-// ── 5. Glue files ──────────────────────────────────────────────────────────
+// ── 5. Glue files (copied from shipped glue/ directory) ──────────────────────
 
 const toolsDir = join(opencodeDir, "tools")
 mkdirSync(toolsDir, { recursive: true })
 
-writeGlue(toolsDir, "stellario-memory.ts", MEMORY_GLUE)
-writeGlue(toolsDir, "stellario-telescope.ts", TELESCOPE_GLUE)
-writeGlue(toolsDir, "stellario-workspace.ts", WORKSPACE_GLUE)
-writeGlue(toolsDir, "stellario-volume-link.ts", VOLUME_LINK_GLUE)
+const glueDir = join(packageRoot, "glue")
+for (const [src, dest] of Object.entries(GLUE_FILES)) {
+  const srcPath = join(glueDir, src)
+  const destPath = join(toolsDir, dest)
+  if (existsSync(destPath)) {
+    console.log(`  Tools: ${dest} (exists, skipped)`)
+  } else {
+    cpSync(srcPath, destPath)
+    console.log(`✓ Tools: ${dest}`)
+  }
+}
 
 // ── 5b. Plugin injector ─────────────────────────────────────────────────────
 
 const pluginDir = join(opencodeDir, "plugin")
 mkdirSync(pluginDir, { recursive: true })
-writeGlue(pluginDir, "stellario-inject.ts", INJECTOR_PLUGIN)
+const pluginSrc = join(glueDir, "plugin.ts")
+const pluginDest = join(pluginDir, "stellario-inject.ts")
+if (existsSync(pluginDest)) {
+  console.log(`  Plugin: stellario-inject.ts (exists, skipped)`)
+} else {
+  cpSync(pluginSrc, pluginDest)
+  console.log(`✓ Plugin: stellario-inject.ts`)
+}
 
 // ── 6. Agent skeletons ─────────────────────────────────────────────────────
 
@@ -405,16 +363,6 @@ function getStellarioVersion() {
     return pkg.version || "latest"
   } catch {
     return "latest"
-  }
-}
-
-function writeGlue(toolsDir, filename, content) {
-  const path = join(toolsDir, filename)
-  if (!existsSync(path)) {
-    writeFileSync(path, content)
-    console.log(`✓ Tools: ${filename}`)
-  } else {
-    console.log(`  Tools: ${filename} (exists, skipped)`)
   }
 }
 

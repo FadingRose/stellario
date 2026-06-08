@@ -1,0 +1,139 @@
+# ╭───────────────────────────────────────────────────────────────────────────╮
+# │  Stellario — Smart Contract Audit Config                                 │
+# │                                                                          │
+# │  All audit projects share a single mutable volume. Tags provide          │
+# │  structural classification and project isolation.                        │
+# │                                                                          │
+# │  Tag hierarchy:                                                          │
+# │    client:    — which organization (fiat24, protocol-x)                  │
+# │    project:   — which audit engagement (delegation-vault, lending)       │
+# │    layer:     — which audit layer (foundation, meta, analysis,           │
+# │                 findings, session)                                       │
+# │    type:      — what kind of entry (observation, concern, issue, ...)    │
+# │    component: — which contract/component (DelegationVault, ...)          │
+# │                                                                          │
+# │  New audit project = memory_create(tags: ["client:...", "project:..."])  │
+# │  No config changes needed.                                               │
+# ╰───────────────────────────────────────────────────────────────────────────╯
+
+memoryDir: ".opencode/.stellario"
+
+# ── Volumes ────────────────────────────────────────────────────────────────
+
+volumes:
+  # audit: all audit project data.
+  #   Every entry must have a client: tag for project isolation.
+  #   Layer and type are distinguished by tags, not separate volumes.
+  audit:
+    profile: mutable
+    boundaries:
+      write: [kira, analysis]
+      read: [all]
+    authority: curated
+    idPrefix: "a"
+    requiredTagPrefix: "client:"
+
+  # handover: session handoff logs. Immutable once written.
+  #   Written at session end, read at session start for context recovery.
+  #   Also requires client: tag to identify which project the handoff belongs to.
+  handover:
+    profile: append
+    boundaries:
+      write: [kira]
+      read: [kira, analysis]
+    authority: curated
+    idPrefix: "h"
+    requiredTagPrefix: "client:"
+
+  # archived: where forgotten entries go. Read-only.
+  archived:
+    profile: frozen
+    boundaries:
+      read: [all]
+
+# ── Agents ─────────────────────────────────────────────────────────────────
+
+agents:
+  kira:
+    display: "meta-kira"
+    role: primary
+  analysis:
+    display: "analysis"
+    role: subagent
+  research:
+    display: "research"
+    role: subagent
+
+# ── Tags ───────────────────────────────────────────────────────────────────
+#
+# Project identification (three levels):
+#   client:    Organization/client name. Required on every entry.
+#              e.g., client:fiat24, client:protocol-x
+#   project:   Audit engagement identifier.
+#              e.g., project:delegation-vault, project:lending
+#   component: Contract or component within the project.
+#              e.g., component:DelegationVault, component:Governance
+#
+# Structural classification (replaces separate layer volumes):
+#   layer:     Which audit layer this entry belongs to.
+#              foundation — stable protocol context (scope, trust assumptions, architecture)
+#              meta       — draft observations from pair reading
+#              analysis   — investigated claims
+#              findings   — final report artifacts
+#              session    — working state
+#
+# Content type:
+#   type:      What kind of knowledge this entry represents.
+#
+# Vulnerability classification (optional):
+#   vuln:      Vulnerability type (reentrancy, access-control, ...)
+#   severity:  Impact level (high, medium, low)
+#
+# Provenance:
+#   source:    Where this knowledge came from (audit, rekt, spec, ...)
+#
+# Protocol/domain:
+#   protocol:  Protocol type (amm, lending, vault, bridge, ...)
+#   arch:      Architecture pattern (proxy, oracle, hub-spoke, ...)
+#   chain:     Target chain (ethereum, arbitrum, ...)
+
+tags:
+  namespaces:
+    - client
+    - project
+    - component
+    - layer
+    - type
+    - vuln
+    - severity
+    - source
+    - protocol
+    - arch
+    - chain
+  typeValues:
+    # foundation layer
+    - scope
+    - trust_assumption
+    - architecture
+    - invariant
+    # meta layer
+    - observation
+    - concern
+    - question
+    # analysis layer
+    - hypothesis
+    - insight
+    # findings layer
+    - issue
+    - recommendation
+    - note
+    # session layer
+    - checkpoint
+    - plan
+    - scratch
+    - blocker
+
+# ── Semantic Search ────────────────────────────────────────────────────────
+
+embedding:
+  enabled: auto
