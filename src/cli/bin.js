@@ -11,7 +11,7 @@ import { parse as parseYaml } from "yaml"
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-const TEMPLATES = ["minimal", "novel", "software"]
+const TEMPLATES = ["minimal", "novel", "software", "audit"]
 const STELLARIO_REPO = "github:FadingRose/stellario"
 
 // ── Glue Templates (must be before main logic) ─────────────────────────────
