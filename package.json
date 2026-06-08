@@ -1,6 +1,6 @@
 {
   "name": "stellario",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "description": "Agent memory infrastructure — Volume-based knowledge management for opencode",
   "type": "module",
   "main": "src/index.ts",
