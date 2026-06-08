@@ -6,7 +6,10 @@ Agents get memory that survives across sessions. Volumes define how memory behav
 
 ## Quick Start
 
+### New project
+
 ```bash
+cd /path/to/your-project
 npx stellario init --template software
 ```
 
@@ -15,6 +18,8 @@ This scaffolds everything inside `.opencode/` — config, tools, agents, plugin,
 Templates: `minimal` · `novel` · `software` · `audit`
 
 ### Existing project
+
+From your **project root** (the directory containing `.opencode/`):
 
 ```bash
 npm --prefix .opencode install stellario
