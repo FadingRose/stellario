@@ -526,6 +526,7 @@ ${allVolumeNames.map(v => `- ${v}`).join("\n")}
 `
   writeFileSync(stellarioAgentPath, stellarioContent)
   console.log(`✓ Guide: stellario.md (wizard)`)
+  }
 } // end else
 
 // ── 7. npm install ─────────────────────────────────────────────────────────

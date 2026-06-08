@@ -6,27 +6,14 @@ Agents get memory that survives across sessions. Volumes define how memory behav
 
 ## Quick Start
 
-### New project
-
 ```bash
 cd /path/to/your-project
 npx stellario init --template software
 ```
 
-This scaffolds everything inside `.opencode/` — config, tools, agents, plugin, memory directory with its own git repo.
+This scaffolds everything inside `.opencode/` — config, tools, agents, plugin, memory directory with its own git repo. Init is idempotent — it skips files that already exist.
 
 Templates: `minimal` · `novel` · `software` · `audit`
-
-### Existing project
-
-From your **project root** (the directory containing `.opencode/`):
-
-```bash
-npm --prefix .opencode install stellario
-npx stellario init --template audit
-```
-
-Init is idempotent — it skips files that already exist.
 
 ## How It Works
 
@@ -79,95 +66,62 @@ Five profiles drive how entries behave:
 | `frozen` | — | — | — | ✓ | sequential |
 | `workspace` | ✓ | ✓ | ✓ | ✓ | sequential + active tracking |
 
-## Volume Link
+## Troubleshooting
 
-An agent can link volumes from other stellario projects into its working context. The external volume is accessed readonly via symlink — the agent observes without modifying.
+### Clean rebuild (preserving memory)
+
+Init is idempotent but skips existing files. To do a full rebuild without losing memory:
 
 ```bash
-# Discover what's available
-discover(path="/path/to/other/project")
+# Generated files — safe to delete
+rm .opencode/tools/stellario-*.ts
+rm .opencode/plugin/stellario-inject.ts
+rm .opencode/agents/*.md
+rm .opencode/package.json .opencode/package-lock.json
+rm -rf .opencode/node_modules
 
-# Link an external volume
-link(project="/path/to/other/project", volume="active", alias="other_active")
-
-# Search includes linked volumes automatically
-search(query="authentication")
+# Then re-init
+npx stellario init --template <your-template>
 ```
 
-## Module API
+What each file contains:
 
-```typescript
-import { getMemoryToolDefs, getTelescopeToolDefs, getWorkspaceToolDefs, getVolumeLinkDefs } from "stellario"
-```
+| File | User data? | Notes |
+|------|-----------|-------|
+| `.opencode/stellario.yaml` | ✏️ Config | You edited this — **don't delete** unless you want to reset |
+| `.opencode/.stellario/` | 🗃️ Memory | JSONL + git — **never delete** |
+| `.opencode/tools/stellario-*.ts` | 🔧 Generated | Glue bindings, safe to rebuild |
+| `.opencode/plugin/stellario-inject.ts` | 🔧 Generated | Plugin injector, safe to rebuild |
+| `.opencode/agents/*.md` | ✏️ Mixed | Generated skeleton, but you may have edited agent instructions |
+| `.opencode/package.json` | 🔧 Generated | Dependencies, safe to rebuild |
 
-| Module | Purpose |
-|--------|---------|
-| `stellario/config` | Load and query `stellario.yaml` |
-| `stellario/store` | JSONL storage engine |
-| `stellario/permissions` | Config-driven permission checks |
-| `stellario/embedding` | Semantic search / embedding engine |
-| `stellario/git` | Git integration |
-| `stellario/context` | Runtime context resolution |
-| `stellario/types` | Type definitions |
+### Tools not showing up in opencode
 
-## Architecture
+1. Check `.opencode/tools/` has the glue files: `ls .opencode/tools/stellario-*.ts`
+2. Check `.opencode/node_modules/stellario` exists: `ls .opencode/node_modules/stellario/package.json`
+3. If missing, run `cd .opencode && npm install`
 
-```
-src/
-├── types.ts              Profile behavior, config types, storage types
-├── config.ts             stellario.yaml loader + validator
-├── store.ts              JSONL read/write, volume index, ID generation, linked volumes
-├── permissions.ts        Agent resolution + permission engine
-├── embedding.ts          Semantic search (embed, index, cosine similarity)
-├── auto-refs.ts          Automatic bidirectional linking engine
-├── git.ts                Git commit integration
-├── context.ts            Project detection + context resolution
-├── index.ts              Public API (tool factory re-exports)
-├── coord/
-│   ├── types.ts          Task lifecycle, file lock types
-│   ├── lock.ts           Advisory file lock + path lock map
-│   └── store.ts          Task CRUD with state machine
-└── defs/
-    ├── memory-defs.ts     create / show / revise / forget / history / meta / ref / unref
-    ├── workspace-defs.ts  status / assemble / open / edit / add / remove
-    ├── telescope-defs.ts  unified search (fzf text + semantic)
-    ├── coordination-defs.ts taskboard plan/claim/update/complete + lock/unlock
-    └── volume-link-defs.ts discover / link / unlink (cross-project)
+### Plugin not injecting context on session start
 
-glue/                       Pre-built opencode tool bindings (shipped with npm package)
-├── memory.ts
-├── telescope.ts
-├── workspace.ts
-├── volume-link.ts
-└── plugin.ts
-```
-src/
-├── types.ts              Profile behavior, config types, storage types
-├── config.ts             stellario.yaml loader + validator
-├── store.ts              JSONL read/write, volume index, ID generation, linked volumes
-├── permissions.ts        Agent resolution + permission engine
-├── embedding.ts          Semantic search (embed, index, cosine similarity)
-├── auto-refs.ts          Automatic bidirectional linking engine
-├── git.ts                Git commit integration
-├── context.ts            Project detection + context resolution
-├── index.ts              Public API (tool factory re-exports)
-├── coord/
-│   ├── types.ts          Task lifecycle, file lock types
-│   ├── lock.ts           Advisory file lock + path lock map
-│   └── store.ts          Task CRUD with state machine
-└── defs/
-    ├── memory-defs.ts     create / show / revise / forget / history / meta / ref / unref
-    ├── workspace-defs.ts  status / assemble / open / edit / add / remove
-    ├── telescope-defs.ts  unified search (fzf text + semantic)
-    ├── coordination-defs.ts taskboard plan/claim/update/complete + lock/unlock
-    └── volume-link-defs.ts discover / link / unlink (cross-project)
+1. Check `.opencode/plugin/stellario-inject.ts` exists
+2. Check `.opencode/stellario.yaml` is valid YAML with `agents:` and `volumes:` defined
+3. The plugin silently skips if memory isn't initialized — call `status` manually to bootstrap
+
+### Embedding model download fails
+
+The semantic search model (~22MB) downloads on first use. If behind a proxy or offline:
+
+```bash
+STELLARIO_EMBEDDING=off  # Disable semantic search, text-only mode
 ```
 
 ## Docs
 
 - [Core Concepts](docs/concepts.md) — profiles, authority, permissions, entries, refs
 - [Configuration](docs/configuration.md) — full `stellario.yaml` reference
-- [API Reference](docs/api.md) — module-level API docs
+- [Volume Link](docs/volume-link.md) — cross-project memory observation
+- [Architecture & Module API](docs/architecture.md) — source layout and module exports
+- [API Reference](docs/api.md) — full API with types and examples
 
 ## License
 

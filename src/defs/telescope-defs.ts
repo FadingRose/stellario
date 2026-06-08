@@ -12,7 +12,7 @@ import {
   readIndex,
   type KeywordIndexEntry,
 } from "../embedding.js"
-import { readLinkedVolume } from "./volume-link-defs.ts"
+import { readLinkedVolume } from "./volume-link-defs.js"
 import { existsSync, readFileSync, readlinkSync } from "fs"
 import { join } from "path"
 
