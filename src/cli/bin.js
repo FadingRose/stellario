@@ -246,17 +246,31 @@ If you see "Memory: empty" in the injected status, this is a fresh install. Run 
 
 Do NOT ask the user questions during this phase. Execute all steps yourself, narrating what you're doing and why. Use the project's actual config (volumes, agents) as demo context.
 
-### Demo 1: Create — write memory
+### Demo 1: Create — write memory (and permissions)
 
-Create 2 entries in the \\\`active\\\` volume to show how memory is stored:
+Pick the first mutable volume from the config that has a write boundary. Try to create an entry:
 
 \`\`\`
-create(volume="active", content="## Project: Stellario Playground\\nA test project for exploring agent memory.", tags=["type:overview"], keywords=["playground", "overview"])
-
-create(volume="active", content="## Convention: Tag Namespace\\nAll tags use namespace:name format (e.g. type:design, severity:high).", tags=["type:convention"], keywords=["tags", "namespace"])
+create(volume="{first_mutable_volume}", content="## Project: Stellario Playground\\nA test project for exploring agent memory.", tags=["type:overview"], keywords=["playground", "overview"])
 \`\`\`
 
-Explain: entries live in volumes. Each volume has a profile (mutable, append, scratch, frozen, workspace). The \\\`active\\\` volume is mutable — entries can be revised and archived. Every entry is git-tracked.
+**If you get a permission error (forbidden):** This is expected! You are \\\`stellario\\\`, and the config may not include \\\`stellario\\\` in the volume's \\\`boundaries.write\\\`. This is by design — permissions are config-driven.
+
+Fix it immediately: use the \\\`edit\\\` tool to add \\\`stellario\\\` to the write (and read) boundaries of the relevant volumes in \\\`.opencode/stellario.yaml\\\`. Then retry the \\\`create\\\`.
+
+Explain to the user:
+- Every volume has \\\`boundaries\\\` that define which agents can read/write
+- If an agent is not listed, the operation is forbidden
+- Fixing permissions is as simple as editing the config — changes take effect immediately
+- This is the security model: agents can only do what the config explicitly allows
+
+Then create a second entry in the same volume:
+
+\`\`\`
+create(volume="{first_mutable_volume}", content="## Convention: Tag Namespace\\nAll tags use namespace:name format (e.g. type:design, severity:high).", tags=["type:convention"], keywords=["tags", "namespace"])
+\`\`\`
+
+Explain: entries live in volumes. Each volume has a profile (mutable, append, scratch, frozen, workspace). Mutable volumes allow revisions and archival. Every entry is git-tracked.
 
 ### Demo 2: Revise — edit memory
 
@@ -304,17 +318,17 @@ Explain: workspace tracks your active context across sessions. \\\`assemble\\\` 
 
 ### Demo 6: Shared Memory — multi-agent collaboration
 
-This is the most important demo. Show how multiple primary agents collaborate through shared volumes.
+This is the most important demo. Show how multiple agents collaborate through shared volumes.
 
-1. Pick an agent from the config that has \\\`role: primary\\\` and can read/write the \\\`active\\\` volume. If none exists besides yourself, use the first agent that has read access to \\\`active\\\`.
+1. Pick the first agent from the config that is NOT \\\`stellario\\\` (any agent with a defined role). If the config has no other agents besides yourself, explain the concept and skip the interactive part.
 2. **Generate that agent's file now** — create \\\`.opencode/agents/{name}.md\\\` following the Agent Construction Rules (see Phase 2). This is a one-time early generation so the demo works.
-3. Write a message to that agent in the \\\`active\\\` volume:
+3. Pick a volume that the target agent can read (check \\\`boundaries.read\\\`). Write a message to that agent:
 
 \`\`\`
-create(volume="active", content="## Task for {agent_name}\\n{agent_name}, please analyze the project's memory structure and leave your observations here.", tags=["type:task", "for:{agent_name}"], keywords=["collaboration", "task"])
+create(volume="{shared_volume}", content="## Task for {agent_name}\\n{agent_name}, please analyze the project's memory structure and leave your observations here.", tags=["type:task", "for:{agent_name}"], keywords=["collaboration", "task"])
 \`\`\`
 
-4. Show the user the \\\`active\\\` volume's \\\`boundaries\\\` from the config — point out that \\\`{agent_name}\\\` is in the read and write lists.
+4. Show the user the volume's \\\`boundaries\\\` from the config — point out that \\\`{agent_name}\\\` is in the read list (and write list if applicable).
 5. Tell the user: **"Now open a new opencode session and switch to the {agent_name} agent."** Wait for them.
 6. Once the user returns, ask them what {agent_name} saw and did. Then demonstrate reading {agent_name}'s response:
 
