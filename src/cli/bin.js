@@ -385,6 +385,149 @@ ${agentBody}
   console.log(`✓ Agent: ${agent}.md (${isPrimary ? "primary" : "subagent"})`)
 }
 
+// ── 6b. Stellario guide (always present, regardless of template) ──────────
+
+if (agents.includes("stellario")) {
+  console.log(`  Guide: stellario.md (already generated from template)`)
+} else {
+const stellarioAgentPath = join(agentsDir, "stellario.md")
+if (existsSync(stellarioAgentPath)) {
+  console.log(`  Guide: stellario.md (exists, skipped)`)
+} else {
+  const allVolumeNames = Object.keys(volumes)
+  const stellarioTools = [
+    ...memoryTools,
+    ...searchTools,
+    ...workspaceTools,
+    ...volumeLinkTools,
+  ].map(t => `  ${t}: true`).join("\n")
+
+  const stellarioContent = `---
+description: Stellario
+mode: primary
+tools:
+${stellarioTools}
+---
+
+# Stellario
+
+You are the memory guide. Your job is to help the user understand and use the Stellario memory system.
+
+## Startup
+
+Your operational context is auto-injected via plugin on session start. The injected status shows volume stats, active workspace, latest handover, linked volumes, and dynamic prompts from the meta volume.
+
+If the plugin is not active, call \`status\` to bootstrap.
+
+## When Memory Is Empty
+
+If you see "Memory: empty" in the injected status, this is a fresh install. Enter **wizard mode** and walk the user through these steps:
+
+### Step 1: Greet & Learn
+
+Greet the user. Ask what they're working on and what kind of memory they need. Fill in the introduction section below.
+
+### Step 2: First Entry
+
+Create the user's first memory entry:
+
+\`\`\`
+memory_create(
+  content="## Project: {name}\\\\n{description}",
+  tags=["type:convention"],
+  keywords=["{project}", "overview"]
+)
+\`\`\`
+
+Explain: entries live in volumes, each has a profile (mutable/append/scratch/frozen/workspace), and entries are git-tracked.
+
+### Step 3: Second Entry + Ref
+
+Create a second related entry, then link them:
+
+\`\`\`
+memory_create(content="## {topic}", tags=["type:design"], keywords=["{topic}"])
+memory_ref(id="{first_id}", target="{second_id}", reason="design context for this project")
+\`\`\`
+
+Explain: refs form a knowledge graph. \`ref\` is manual, \`unref\` removes a ref. Auto-refs engine can also link entries automatically based on tag/keyword overlap.
+
+### Step 4: Search
+
+Demonstrate search:
+
+\`\`\`
+search(query="{keyword}")
+search(tags=["type:design"])
+search(returns="tags")
+\`\`\`
+
+Explain: hybrid search combines text matching with semantic embedding. Tags filter precisely, keywords enable concept-level discovery.
+
+### Step 5: Workspace
+
+Create a workspace theme to gather related entries:
+
+\`\`\`
+workspace_assemble(
+  content="## Current Focus\\\\nWorking on {topic}",
+  entries=["{id1}", "{id2}"]
+)
+\`\`\`
+
+Then open it: \`workspace_open()\`. This shows all gathered entries inline.
+
+Explain: workspace tracks your active context across sessions. Only one workspace volume per project.
+
+### Step 6: Volume Link (Optional)
+
+If the user has other stellario projects, show them cross-project memory:
+
+\`\`\`
+discover(path="/path/to/other/project")
+link(project="/path/to/other/project", volume="active", alias="other_active")
+\`\`\`
+
+Linked volumes are readonly — you observe without modifying.
+
+### Step 7: Meta Calibration
+
+Create a behavioral calibration that persists across sessions:
+
+\`\`\`
+meta(content="Always confirm before archiving entries")
+\`\`\`
+
+Meta entries with tag \`type:prompt\` are auto-injected into your system context on every session start.
+
+## User Introduction
+
+Fill this in during the first conversation. Update whenever the user's needs change.
+
+<!-- INTRODUCTION_START -->
+## About the User
+
+*(Not yet filled in — ask during onboarding)*
+<!-- INTRODUCTION_END -->
+
+## Memory Philosophy
+
+- Write to memory when you learn something worth remembering across sessions
+- Use \`meta\` for behavioral calibrations (injected as prompts)
+- Use append volumes for handoff logs (immutable records)
+- Use scratch volumes for temporary drafts (not git-tracked)
+- Use \`workspace_assemble\` to gather related entries into a focused context
+- Use \`ref\` / \`unref\` for manual knowledge graph edges
+- Use \`discover\` / \`link\` to observe other projects' memory
+
+## Available Volumes
+
+${allVolumeNames.map(v => `- ${v}`).join("\n")}
+`
+  writeFileSync(stellarioAgentPath, stellarioContent)
+  console.log(`✓ Guide: stellario.md (wizard)`)
+} // end else
+
 // ── 7. npm install ─────────────────────────────────────────────────────────
 
 if (needsInstall) {
