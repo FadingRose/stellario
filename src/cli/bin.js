@@ -302,7 +302,29 @@ open()
 
 Explain: workspace tracks your active context across sessions. \\\`assemble\\\` gathers entries, \\\`open\\\` expands them inline. Only one workspace volume per project.
 
-### Demo 6: Volume Link — cross-project observation
+### Demo 6: Shared Memory — multi-agent collaboration
+
+This is the most important demo. Show how multiple primary agents collaborate through shared volumes.
+
+1. Pick an agent from the config that has \\\`role: primary\\\` and can read/write the \\\`active\\\` volume. If none exists besides yourself, use the first agent that has read access to \\\`active\\\`.
+2. **Generate that agent's file now** — create \\\`.opencode/agents/{name}.md\\\` following the Agent Construction Rules (see Phase 2). This is a one-time early generation so the demo works.
+3. Write a message to that agent in the \\\`active\\\` volume:
+
+\`\`\`
+create(volume="active", content="## Task for {agent_name}\\n{agent_name}, please analyze the project's memory structure and leave your observations here.", tags=["type:task", "for:{agent_name}"], keywords=["collaboration", "task"])
+\`\`\`
+
+4. Show the user the \\\`active\\\` volume's \\\`boundaries\\\` from the config — point out that \\\`{agent_name}\\\` is in the read and write lists.
+5. Tell the user: **"Now open a new opencode session and switch to the {agent_name} agent."** Wait for them.
+6. Once the user returns, ask them what {agent_name} saw and did. Then demonstrate reading {agent_name}'s response:
+
+\`\`\`
+search(query="{agent_name}")
+\`\`\`
+
+Explain: this is the core collaboration model. Agents don't talk to each other directly — they share context through volumes. Any agent with read access to a volume can see everything there. Agents with write access can leave messages and observations. This is how multi-agent coordination works without any message-passing infrastructure.
+
+### Demo 7: Volume Link — cross-project observation
 
 Demonstrate linking an external Stellario project:
 
@@ -315,7 +337,7 @@ Demonstrate linking an external Stellario project:
 
 Explain: linked volumes are readonly symlinks. You observe without modifying. This is how a project can reference a shared knowledge base, or how an audit can observe a client project's memory without touching it.
 
-### Demo 7: Meta — behavioral calibration
+### Demo 8: Meta — behavioral calibration
 
 Create a meta entry that persists across sessions:
 
@@ -332,7 +354,7 @@ Explain: meta entries with tag \\\`type:prompt\\\` are auto-injected into your s
 After the demo, guide the user through setting up their project:
 
 1. **Ask about the project** — What are you working on? What kind of memory do you need?
-2. **Generate agent files** — Read \\\`.opencode/stellario.yaml\\\`, create \\\`.opencode/agents/{name}.md\\\` for every agent defined in the config (except yourself). See Agent Construction Rules below.
+2. **Generate agent files** — Read \`.opencode/stellario.yaml\`, create \`.opencode/agents/{name}.md\` for every agent defined in the config (except yourself and any agent already generated during Demo 6). See Agent Construction Rules below.
 3. **First real entries** — Help the user write their first meaningful memory entries based on their project context
 
 ### Agent Construction Rules
