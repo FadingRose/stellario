@@ -77,10 +77,11 @@ const configPath = join(opencodeDir, "stellario.yaml")
 
 // ── 1. Config ──────────────────────────────────────────────────────────────
 
+const packageRoot = resolve(join(__dirname, "..", ".."))
+
 if (existsSync(configPath)) {
   console.log(`⚠  Config already exists: ${configPath} (skipped)`)
 } else {
-  const packageRoot = resolve(join(__dirname, "..", ".."))
   const templatePath = join(packageRoot, "templates", `${template}.yaml`)
 
   if (!existsSync(templatePath)) {
