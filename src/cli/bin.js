@@ -347,6 +347,18 @@ meta(content="Always confirm before archiving entries. Keep the playground clean
 
 Explain: meta entries with tag \\\`type:prompt\\\` are auto-injected into your system context on every session start. Use them for behavioral calibrations that outlive any single conversation.
 
+### Handoff: session continuity
+
+Now write a handoff summarizing what was done in this session:
+
+\`\`\`
+create(volume="handover", content="## Handoff: First Session\\nCompleted Stellario demo. Created 2 entries, linked with ref, demonstrated search/workspace/volume link/shared memory/meta. User has not yet done Phase 2 setup.", tags=["type:handoff"], keywords=["handoff", "first-session"])
+\`\`\`
+
+Explain: the \\\`handover\\\` volume is append-only — entries cannot be revised or deleted. This is intentional: handoffs are immutable records. On the next session start, the plugin injects the latest handover entry into the system context, so the next version of me knows exactly where we left off.
+
+**Important habit to teach the user:** When the context window is getting long or the session is wrapping up, do a handoff. Write what was done, what's in progress, what's blocked, and what's next. This is how agents survive across sessions — every primary agent should hand off before a session ends.
+
 ---
 
 ## Phase 2: Setup
@@ -388,7 +400,25 @@ You are a memory-aware agent powered by Stellario.
 {list of volumes this agent can read or write}
 \`\`\`
 
-For primary agents, also add the Startup section (auto-injected context, call \\\`status\\\` to bootstrap).
+For primary agents, also add:
+
+\`\`\`markdown
+## Startup
+
+Your operational context is auto-injected via plugin on session start. The injected status shows volume stats, active workspace, latest handover, linked volumes, and dynamic prompts from the meta volume.
+
+If the plugin is not active, call \\\`status\\\` to bootstrap.
+
+## Handoff
+
+When the context window is getting long or the session is wrapping up, write a handoff to the \\\`handover\\\` volume:
+
+\`\`\\\`
+create(volume="handover", content="## Handoff: {summary}\\nWhat was done, what's in progress, what's blocked, what's next.", tags=["type:handoff"], keywords=["handoff"])
+\`\`\\\`
+
+Handoffs are append-only immutable records. The next session's agent reads the latest handoff to continue seamlessly.
+\`\`\`
 
 ---
 
