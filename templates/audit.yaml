@@ -27,7 +27,7 @@ volumes:
   audit:
     profile: mutable
     boundaries:
-      write: [kira, analysis]
+      write: [auditor, analysis]
       read: [all]
     authority: curated
     idPrefix: "a"
@@ -39,8 +39,8 @@ volumes:
   handover:
     profile: append
     boundaries:
-      write: [kira]
-      read: [kira, analysis]
+      write: [auditor]
+      read: [auditor, analysis]
     authority: curated
     idPrefix: "h"
     requiredTagPrefix: "client:"
@@ -54,14 +54,14 @@ volumes:
 # ── Agents ─────────────────────────────────────────────────────────────────
 
 agents:
-  kira:
-    display: "meta-kira"
+  auditor:
+    display: "Auditor"
     role: primary
   analysis:
-    display: "analysis"
+    display: "Analysis"
     role: subagent
   research:
-    display: "research"
+    display: "Research"
     role: subagent
 
 # ── Tags ───────────────────────────────────────────────────────────────────
