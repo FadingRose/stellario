@@ -126,7 +126,7 @@ export function buildStatus(projectRoot: string, agentName: string): string {
 
   // ── Taskboard ──
   const activeTasks = queryTasks(memDir, {
-    status: ["open", "claimed", "in_progress", "review"],
+    status: ["open", "claimed", "in_progress", "pending", "review"],
   })
   const activeLocks = getAllActiveLocks(memDir)
 
@@ -136,13 +136,14 @@ export function buildStatus(projectRoot: string, agentName: string): string {
     lines.push("Taskboard:")
 
     if (activeTasks.length > 0) {
-      const statusOrder = ["in_progress", "claimed", "open", "review"] as const
+      const statusOrder = ["in_progress", "pending", "claimed", "open", "review"] as const
       for (const status of statusOrder) {
         const group = activeTasks.filter(t => t.status === status)
         for (const task of group) {
           const owner = task.owner || "\u2014"
           const paths = (task.paths?.length ?? 0) > 0 ? `  ${task.paths.join(", ")}` : ""
-          lines.push(`  [${task.id}] ${status.padEnd(12)} ${owner.padEnd(14)} ${task.title}`)
+          const reasonStr = task.status_reason ? ` — ${task.status_reason}` : ""
+          lines.push(`  [${task.id}] ${status.padEnd(12)} ${owner.padEnd(14)} ${task.title}${reasonStr}`)
           if (paths) lines.push(`    ${paths}`)
         }
       }

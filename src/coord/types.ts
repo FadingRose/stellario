@@ -11,13 +11,19 @@
  * Task status lifecycle:
  *
  *   open → claimed → in_progress → review → done
+ *                       ↓  ↑            ↓
+ *                    pending        in_progress
  *                       ↓
  *                    cancelled
+ *
+ * Any non-terminal state can transition to cancelled.
+ * pending = blocked mid-work (e.g. waiting on a dependency).
  */
 export type TaskStatus =
   | "open"
   | "claimed"
   | "in_progress"
+  | "pending"
   | "review"
   | "done"
   | "cancelled"
@@ -29,7 +35,8 @@ export type TaskStatus =
 export const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   open:        ["claimed", "cancelled"],
   claimed:     ["in_progress", "open", "cancelled"],
-  in_progress: ["review", "done", "cancelled"],
+  in_progress: ["pending", "review", "done", "cancelled"],
+  pending:     ["in_progress", "cancelled"],
   review:      ["done", "in_progress", "cancelled"],
   done:        [],
   cancelled:   [],
@@ -40,6 +47,7 @@ export interface Task {
   title: string
   body?: string
   status: TaskStatus
+  status_reason?: string   // why the last status change happened
   author: string          // agent who created the task
   owner?: string          // agent who claimed it
   paths: string[]         // project-relative file paths this task involves

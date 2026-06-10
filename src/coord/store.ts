@@ -205,6 +205,7 @@ export function updateTaskStatus(
   id: string,
   newStatus: TaskStatus,
   agent: string,
+  reason?: string,
 ): Task {
   const tasks = readTasks(memDir)
   const index = tasks.findIndex(t => t.id === id)
@@ -221,8 +222,8 @@ export function updateTaskStatus(
     )
   }
 
-  // Authorize: only the owner can transition claimed/in_progress/review
-  if (["claimed", "in_progress", "review"].includes(task.status)) {
+  // Authorize: only the owner can transition claimed/in_progress/pending/review
+  if (["claimed", "in_progress", "pending", "review"].includes(task.status)) {
     if (task.owner && task.owner !== agent) {
       throw new Error(
         `Task "${id}" is owned by "${task.owner}". Only the owner can change status from "${task.status}".`
@@ -246,6 +247,7 @@ export function updateTaskStatus(
   tasks[index] = {
     ...task,
     status: newStatus,
+    status_reason: reason,
     updated: today(),
     completed: (newStatus === "done" || newStatus === "cancelled") ? today() : undefined,
   }

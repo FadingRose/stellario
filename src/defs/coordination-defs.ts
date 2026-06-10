@@ -153,10 +153,12 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
     description:
       "Update a task. Can change status (with transition validation), " +
       "or update metadata (title, body, paths, tags). " +
-      "Status transitions: open→claimed, claimed→in_progress, in_progress→review, review→done.",
+      "Status transitions: open→claimed, claimed→in_progress, in_progress→pending/review/done, pending→in_progress, review→done. " +
+      "Optional 'reason' to explain why the status changed (e.g. why blocked).",
     args: {
       id: z.string().describe("Task ID."),
       status: z.string().optional().describe("New status. Must be a valid transition from current."),
+      reason: z.string().optional().describe("Why the status changed. E.g. 'blocked by tb03' or 'dependency resolved'."),
       title: z.string().optional().describe("Updated title."),
       body: z.string().optional().describe("Updated description."),
       paths: z.array(z.string()).optional().describe("Updated file paths."),
@@ -176,8 +178,9 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
       try {
         // Status update
         if (args.status) {
-          const task = updateTaskStatus(ctx.memDir, args.id, args.status as TaskStatus, agent)
-          return `Updated [${task.id}] → ${task.status}`
+          const task = updateTaskStatus(ctx.memDir, args.id, args.status as TaskStatus, agent, args.reason)
+          const reasonLine = task.status_reason ? ` (${task.status_reason})` : ""
+          return `Updated [${task.id}] → ${task.status}${reasonLine}`
         }
 
         // Metadata update
@@ -299,7 +302,7 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
         lines.push("")
 
         // Group by status for readability
-        const statusOrder: TaskStatus[] = ["in_progress", "claimed", "open", "review", "done", "cancelled"]
+        const statusOrder: TaskStatus[] = ["in_progress", "pending", "claimed", "open", "review", "done", "cancelled"]
         const grouped = new Map<TaskStatus, typeof tasks>()
         for (const task of tasks) {
           const group = grouped.get(task.status) || []
@@ -313,6 +316,7 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
 
           const statusIcon: Record<string, string> = {
             in_progress: "\u25b6",
+            pending: "\u23f8",
             claimed: "\u2611",
             open: "\u25cb",
             review: "\u23f3",
@@ -326,7 +330,8 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
             const paths = (task.paths?.length ?? 0) > 0
               ? `  [${task.paths.join(", ")}]`
               : ""
-            lines.push(`  ${icon} [${task.id}] ${task.status.padEnd(12)} ${owner.padEnd(14)} ${task.title}`)
+            const reasonStr = task.status_reason ? ` — ${task.status_reason}` : ""
+            lines.push(`  ${icon} [${task.id}] ${task.status.padEnd(12)} ${owner.padEnd(14)} ${task.title}${reasonStr}`)
             if (paths) lines.push(`    ${paths}`)
             if ((task.depends_on?.length ?? 0) > 0) {
               lines.push(`    depends: ${task.depends_on.join(", ")}`)
