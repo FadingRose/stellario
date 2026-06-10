@@ -7,6 +7,101 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-06-10
+
+### Added
+
+- `glue/coordination.ts` — glue file for taskboard tools, enabling `stellario init` to deploy coordination tools to `.opencode/tools/` ([this commit]).
+- `GLUE_FILES` mapping in `bin.js` now includes `coordination.ts` → `stellario-coordination.ts`.
+
+## [0.8.2] - 2026-06-10
+
+### Added
+
+- Author filter in telescope search — filter entries by `author` field.
+
+### Fixed
+
+- Dynamic import in plugin (`stellario-inject.ts`) to prevent session freeze when Stellario fails to load.
+- Pre-download embedding model (~22MB) during `stellario init` instead of on first search.
+
+## [0.8.0] - 2026-06-08
+
+### Changed
+
+- **Wizard redesign**: two-phase flow — Demo → Setup. Phase 1 runs a self-guided demo (no user questions). Phase 2 generates agents and writes first real entries.
+- `stellario init` only generates `stellario.md` guide agent; other agents are delegated to the wizard.
+
+### Added
+
+- Template-agnostic wizard with dynamic volume/agent selection and permissions demo.
+- Handoff demo in Phase 1 + handoff prompt section in all primary agent templates.
+- Shared memory demo — multi-agent collaboration via shared volumes.
+- `audit` template registered in CLI `TEMPLATES` list.
+
+### Fixed
+
+- Use npm registry instead of GitHub ref for stellario dependency in generated `package.json`.
+
+## [0.7.2] - 2026-06-08
+
+### Fixed
+
+- `bin.js` brace balance, unified `.js` imports, restructured README.
+
+## [0.7.1] - 2026-06-08
+
+### Fixed
+
+- Moved `packageRoot` resolution to outer scope for config-exists path.
+
+### Changed
+
+- README restructured for glue architecture.
+- README slimmed from 302 to 132 lines.
+
+### Added
+
+- Structured onboarding walkthrough in primary agent template.
+- `stellario.md` guide agent always generated regardless of template.
+- Audit template agent renamed `kira` → `auditor`.
+- Pre-built `glue/` files shipped with package, eliminating inline templates from CLI.
+- `dtype=fp32` specified for transformers to suppress warnings.
+
+## [0.7.0] - 2026-06-03
+
+### Added
+
+- **Volume-level link/unlink.** New `volume-link` tools for cross-project memory observation — `discover`, `link`, `unlink`. Linked volumes appear as readonly symlinks; entries are visible via search but cannot be modified. Replaces the previous entry-level `link`/`unlink` tools (renamed to `ref`/`unref`).
+
+### Fixed
+
+- Task array fields (`paths`, `depends_on`, `tags`) normalized on read for defensive parsing.
+
+## [0.6.1] - 2026-06-03
+
+### Fixed
+
+- `autoRefs` config field passthrough and refs display in `show`.
+- Removed duplicate `auto:` prefix in show refs display.
+
+## [0.6.0] - 2026-06-03
+
+### Added
+
+- **Git history subsystem.** Every `create`/`revise`/`forget` is auto-committed to the memory directory's git repo. `memory_history` shows full revision log with diffs.
+- **Refs subsystem.** Manual `ref`/`unref` for explicit knowledge graph edges. Auto-refs engine links entries with overlapping tags/keywords.
+- `meta` tool for cross-session behavioral calibration. Entries tagged `type:prompt` are auto-injected into system context on session start.
+- Workspace theme tools: `assemble`, `open`, `edit`, `add`, `remove` for gathering related entries into a focused context.
+- Per-agent workspace and handover isolation — each agent has its own active workspace and sees its own latest handoff.
+- `revise` API simplified: `volume` parameter optional, range string replaced with `from`/`to` line numbers.
+
+### Fixed
+
+- `memory_revise` off-by-one error and empty content deletion bug.
+- Guard against undefined `task.paths`/`depends_on`/`tags` in board rendering.
+- Clarified revise tool API descriptions.
+
 ## [0.5.0] - 2026-05-30
 
 ### Added
@@ -106,7 +201,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Telescope tool: unified search with text matching, tag filtering (`AND`/`OR`/`NOT`), and keyword enumeration modes.
 - Documentation: README, API reference, configuration guide, concepts guide.
 
-[Unreleased]: https://github.com/FadingRose/stellario/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/FadingRose/stellario/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/FadingRose/stellario/compare/v0.8.2...v0.8.3
+[0.8.2]: https://github.com/FadingRose/stellario/compare/v0.8.0...v0.8.2
+[0.8.0]: https://github.com/FadingRose/stellario/compare/v0.7.2...v0.8.0
+[0.7.2]: https://github.com/FadingRose/stellario/compare/v0.7.1...v0.7.2
+[0.7.1]: https://github.com/FadingRose/stellario/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/FadingRose/stellario/compare/v0.6.1...v0.7.0
+[0.6.1]: https://github.com/FadingRose/stellario/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/FadingRose/stellario/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/FadingRose/stellario/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/FadingRose/stellario/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/FadingRose/stellario/compare/v0.2.0...v0.3.0

@@ -20,6 +20,7 @@ const GLUE_FILES = {
   "telescope.ts": "stellario-telescope.ts",
   "workspace.ts": "stellario-workspace.ts",
   "volume-link.ts": "stellario-volume-link.ts",
+  "coordination.ts": "stellario-coordination.ts",
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────
