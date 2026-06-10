@@ -2,7 +2,7 @@
 // Stellario CLI — pure JS, no build step needed
 // This file is the npm bin entry point
 
-import { existsSync, mkdirSync, writeFileSync, cpSync, readFileSync } from "fs"
+import { existsSync, mkdirSync, writeFileSync, cpSync, readFileSync, readdirSync } from "fs"
 import { join, resolve, dirname } from "path"
 import { execSync } from "child_process"
 import { fileURLToPath } from "url"
@@ -21,6 +21,8 @@ const GLUE_FILES = {
   "workspace.ts": "stellario-workspace.ts",
   "volume-link.ts": "stellario-volume-link.ts",
   "coordination.ts": "stellario-coordination.ts",
+  "lsp.ts": "stellario-lsp.ts",
+  "ast-grep.ts": "stellario-ast-grep.ts",
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────
@@ -92,6 +94,45 @@ if (existsSync(configPath)) {
 
   mkdirSync(opencodeDir, { recursive: true })
   cpSync(templatePath, configPath)
+
+  // ── 1b. Auto-detect LSP servers ──
+  const lspResult = detectLspServers(projectRoot)
+  const lspConfig = lspResult.servers
+  const lspComments = lspResult.comments
+
+  if (Object.keys(lspConfig).length > 0 || lspComments.length > 0) {
+    const existingYaml = readFileSync(configPath, "utf-8")
+    const sections = []
+
+    // Active servers
+    if (Object.keys(lspConfig).length > 0) {
+      const lspYaml = Object.entries(lspConfig).map(([name, conf]) => {
+        const lines = [`  ${name}:`, `    command: [${conf.command.map(c => `"${c}"`).join(", ")}]`]
+        if (conf.indexing) {
+          lines.push(`    indexing:`)
+          lines.push(`      strategy: ${conf.indexing.strategy}`)
+          lines.push(`      timeout: ${conf.indexing.timeout}`)
+        }
+        return lines.join("\n")
+      }).join("\n")
+      sections.push(lspYaml)
+    }
+
+    // Commented-out servers (detected language but missing binary)
+    for (const comment of lspComments) {
+      sections.push(comment)
+    }
+
+    writeFileSync(configPath, existingYaml.trimEnd() + "\n\n# ── LSP (auto-detected) ──\n\nlsp:\n" + sections.join("\n\n") + "\n")
+
+    if (Object.keys(lspConfig).length > 0) {
+      console.log(`✓ LSP: auto-detected ${Object.keys(lspConfig).join(", ")}`)
+    }
+    for (const hint of lspResult.hints) {
+      console.log(`  ${hint}`)
+    }
+  }
+
   console.log(`✓ Config: ${configPath}`)
 }
 
@@ -509,6 +550,38 @@ if (existsSync(gitignorePath)) {
 }
 
 console.log("")
+
+// ── 10. Tool availability check ──
+
+const toolStatus = []
+
+// ast-grep
+try {
+  execSync("which ast-grep", { stdio: "pipe" })
+  toolStatus.push(["ast-grep", true, ""])
+} catch {
+  toolStatus.push(["ast-grep", false, "npm i -g @ast-grep/cli | cargo install ast-grep"])
+}
+
+// LSP servers
+try { execSync("which rust-analyzer", { stdio: "pipe" }); toolStatus.push(["rust-analyzer", true, ""]) } catch { toolStatus.push(["rust-analyzer", false, "rustup component add rust-analyzer"]) }
+try { execSync("which gopls", { stdio: "pipe" }); toolStatus.push(["gopls", true, ""]) } catch { toolStatus.push(["gopls", false, "go install golang.org/x/tools/gopls@latest"]) }
+try { execSync("which forge", { stdio: "pipe" }); toolStatus.push(["forge", true, ""]) } catch {
+  try { execSync("which solc", { stdio: "pipe" }); toolStatus.push(["solc", true, ""]) } catch { toolStatus.push(["forge/solc", false, "https://getfoundry.sh | pip install solc"]) }
+}
+
+const installed = toolStatus.filter(([, ok]) => ok)
+const missing = toolStatus.filter(([, ok]) => !ok)
+
+console.log("Tool availability:")
+for (const [name, ok] of installed) {
+  console.log(`  ✓ ${name}`)
+}
+for (const [name, , hint] of missing) {
+  console.log(`  ✗ ${name} — install: ${hint}`)
+}
+
+console.log("")
 console.log("Done! Next steps:")
 console.log(`  1. Edit .opencode/stellario.yaml to customize`)
 console.log(`  2. Create type:prompt entries in meta volume for dynamic prompts`)
@@ -530,5 +603,91 @@ function getStellarioVersion() {
   } catch {
     return "latest"
   }
+}
+
+/**
+ * Auto-detect language servers based on project files.
+ * Checks for Cargo.toml (Rust), go.mod (Go), and *.sol (Solidity).
+ * Returns an LSP config object (same shape as stellario.yaml `lsp:` section).
+ */
+function detectLspServers(root) {
+  const servers = {}
+  const comments = []
+  const hints = []
+
+  // Rust — rust-analyzer
+  if (existsSync(join(root, "Cargo.toml"))) {
+    try {
+      execSync("which rust-analyzer", { stdio: "pipe" })
+      servers.rust = {
+        command: ["rust-analyzer"],
+        indexing: { strategy: "poll-symbol", timeout: 60000, pollQuery: "main", pollInterval: 2000 },
+      }
+    } catch {
+      comments.push(`  # rust: Cargo.toml found but rust-analyzer not installed.\n  # Install: rustup component add rust-analyzer\n  # rust:\n  #   command: ["rust-analyzer"]\n  #   indexing:\n  #     strategy: poll-symbol\n  #     timeout: 60000`)
+      hints.push("⚠ Cargo.toml found but rust-analyzer not installed. Install: rustup component add rust-analyzer")
+    }
+  }
+
+  // Go — gopls
+  if (existsSync(join(root, "go.mod"))) {
+    try {
+      execSync("which gopls", { stdio: "pipe" })
+      servers.go = {
+        command: ["gopls"],
+        indexing: { strategy: "timeout", timeout: 10000 },
+      }
+    } catch {
+      comments.push(`  # go: go.mod found but gopls not installed.\n  # Install: go install golang.org/x/tools/gopls@latest\n  # go:\n  #   command: ["gopls"]\n  #   indexing:\n  #     strategy: timeout\n  #     timeout: 10000`)
+      hints.push("⚠ go.mod found but gopls not installed. Install: go install golang.org/x/tools/gopls@latest")
+    }
+  }
+
+  // Solidity — forge or solc
+  const hasSol = findFilesRecursive(root, ".sol", 3).length > 0
+  if (hasSol) {
+    try {
+      execSync("which forge", { stdio: "pipe" })
+      servers.solidity = {
+        command: ["forge", "lsp"],
+        indexing: { strategy: "timeout", timeout: 15000 },
+      }
+    } catch {
+      try {
+        execSync("which solc", { stdio: "pipe" })
+        servers.solidity = {
+          command: ["solc", "--lsp"],
+          indexing: { strategy: "timeout", timeout: 10000 },
+        }
+      } catch {
+        comments.push(`  # solidity: .sol files found but neither forge nor solc installed.\n  # Install forge: https://getfoundry.sh\n  # Install solc: pip install solc\n  # solidity:\n  #   command: ["forge", "lsp"]\n  #   indexing:\n  #     strategy: timeout\n  #     timeout: 15000`)
+        hints.push("⚠ .sol files found but neither forge nor solc installed. Install: https://getfoundry.sh")
+      }
+    }
+  }
+
+  return { servers, comments, hints }
+}
+
+/**
+ * Find files with a given extension, up to maxDepth levels deep.
+ */
+function findFilesRecursive(dir, ext, maxDepth) {
+  const results = []
+  if (maxDepth <= 0) return results
+  try {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith(".") || entry.name === "node_modules") continue
+      const fullPath = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        results.push(...findFilesRecursive(fullPath, ext, maxDepth - 1))
+      } else if (entry.name.endsWith(ext)) {
+        results.push(fullPath)
+      }
+    }
+  } catch {
+    // Permission denied or other error — skip
+  }
+  return results
 }
 

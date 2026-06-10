@@ -109,6 +109,8 @@ export interface StellarioConfig {
   tags?: TagConfig
   /** Semantic search / embedding configuration. */
   embedding?: EmbeddingConfig
+  /** LSP server configuration. Key = server name. */
+  lsp?: Record<string, any>
 }
 
 // ─── Storage Types ──────────────────────────────────────────────────────────

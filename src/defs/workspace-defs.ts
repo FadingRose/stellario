@@ -5,6 +5,7 @@ import { readJsonl, readVolumeIndex, extractTitle, findEntry, getActiveWorkspace
 import { loadConfig, getMemoryDir, getWorkspaceVolume } from "../config.js"
 import { queryTasks } from "../coord/store.js"
 import { getAllActiveLocks } from "../coord/lock.js"
+import { getLspStatus } from "../lsp/manager.js"
 import { gitCommit } from "../git.js"
 import { existsSync, readFileSync } from "fs"
 import { join, basename } from "path"
@@ -173,6 +174,32 @@ export function buildStatus(projectRoot: string, agentName: string): string {
         count = content.trim().split("\n").filter(l => l.trim()).length
       } catch { /* broken symlink */ }
       lines.push(`  ${lv.alias} ← ${lv.source_volume} @ ${basename(lv.source_project)} (${count} entries, readonly)`)
+    }
+  }
+
+  // ── LSP status ──
+  const lspStatus = getLspStatus()
+  if (lspStatus.length > 0) {
+    lines.push("")
+    lines.push("\u2500\u2500\u2500")
+    lines.push("LSP:")
+    for (const entry of lspStatus) {
+      const sec = Math.floor(entry.elapsedMs / 1000)
+      const elapsed = sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}m ${sec % 60}s`
+      switch (entry.state) {
+        case "ready":
+          lines.push(`  ${entry.name}: ready`)
+          break
+        case "starting":
+          lines.push(`  ${entry.name}: indexing... (${elapsed})`)
+          break
+        case "error":
+        case "crashed":
+          lines.push(`  ${entry.name}: ${entry.state}${entry.detail ? ` (${entry.detail})` : ""}`)
+          break
+        default:
+          lines.push(`  ${entry.name}: ${entry.state}`)
+      }
     }
   }
 

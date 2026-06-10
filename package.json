@@ -1,6 +1,6 @@
 {
   "name": "stellario",
-  "version": "0.8.4",
+  "version": "0.9.0",
   "description": "Agent memory infrastructure — Volume-based knowledge management for opencode",
   "type": "module",
   "main": "src/index.ts",
@@ -14,6 +14,8 @@
     "./defs/telescope": "./src/defs/telescope-defs.ts",
     "./defs/workspace": "./src/defs/workspace-defs.ts",
     "./defs/coordination": "./src/defs/coordination-defs.ts",
+    "./defs/lsp": "./src/defs/lsp-defs.ts",
+    "./defs/ast-grep": "./src/defs/ast-grep-defs.ts",
     "./defs/volume-link": "./src/defs/volume-link-defs.ts",
     "./config": "./src/config.ts",
     "./store": "./src/store.ts",
@@ -22,7 +24,10 @@
     "./embedding": "./src/embedding.ts",
     "./coord/types": "./src/coord/types.ts",
     "./coord/lock": "./src/coord/lock.ts",
-    "./coord/store": "./src/coord/store.ts"
+    "./coord/store": "./src/coord/store.ts",
+    "./lsp/types": "./src/lsp/types.ts",
+    "./lsp/client": "./src/lsp/client.ts",
+    "./lsp/manager": "./src/lsp/manager.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.0.0",

@@ -124,6 +124,7 @@ function validateConfig(raw: any, sourcePath: string): StellarioConfig {
     agents,
     tags: raw.tags,
     embedding,
+    lsp: raw.lsp && typeof raw.lsp === "object" ? raw.lsp : undefined,
   }
 }
 

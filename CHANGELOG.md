@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-10
+
+### Added
+
+- **LSP integration.** Generic Language Server Protocol client for code navigation. Works with any LSP-compliant server (rust-analyzer, gopls, forge/solc). 4 new tools: `lsp_references`, `lsp_definition`, `lsp_symbols`, `lsp_call_hierarchy`.
+- `src/lsp/client.ts` — Generic JSON-RPC 2.0 over stdio LSP client. Language-agnostic, singleton per server.
+- `src/lsp/manager.ts` — Singleton manager with sync-readable status for `buildStatus()`. Fire-and-forget init from plugin (non-blocking).
+- `src/lsp/types.ts` — LSP protocol types, client state, and config types.
+- `src/defs/lsp-defs.ts` — 4 tool definitions for references, definition, symbols, call hierarchy.
+- `buildStatus()` now shows LSP server status (indexing / ready / crashed).
+- Plugin (`glue/plugin.ts`) triggers LSP init on session start (fire-and-forget, non-blocking).
+- `stellario init` auto-detects LSP servers from project files (Cargo.toml → rust-analyzer, go.mod → gopls, *.sol → forge/solc). Missing binaries are noted as comments in yaml + install hints in console.
+- `stellario init` runs a tool availability check at the end, showing which tools are installed and how to install missing ones.
+
+- **ast-grep integration.** Structural code search via `ast-grep` CLI. Pattern-matching by AST structure, resilient to formatting changes.
+- `src/defs/ast-grep-defs.ts` — `ast_grep_search` tool definition. Supports language auto-detection, path filtering, and result pagination.
+
+- **Coordination glue.** Taskboard tools now deployable via `stellario init`.
+- `glue/coordination.ts` — Standard glue file for 7 taskboard tools (plan, claim, update, complete, board, lock, unlock).
+- `GLUE_FILES` mapping in `bin.js` now includes `coordination.ts`, `lsp.ts`, `ast-grep.ts`.
+
+- **Taskboard: pending state.** New `pending` status for blocked tasks (mid-work, waiting on dependency). Transitions: `in_progress → pending → in_progress`.
+- `Task.status_reason` field — optional reason attached to status changes.
+- Updated transition table in `src/coord/types.ts`.
+
+### Config
+
+- `lsp:` section in `stellario.yaml`. Key = server name, value = `{ command, indexing }`.
+- `indexing.strategy`: `timeout` (wait fixed time), `poll-symbol` (poll until indexed), `none` (ready immediately).
+- `StellarioConfig.lsp` field added.
+- Package exports: `stellario/defs/lsp`, `stellario/defs/ast-grep`, `stellario/lsp/*`.
+
 ## [0.8.4] - 2026-06-10
 
 ### Added
@@ -221,7 +253,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Telescope tool: unified search with text matching, tag filtering (`AND`/`OR`/`NOT`), and keyword enumeration modes.
 - Documentation: README, API reference, configuration guide, concepts guide.
 
-[Unreleased]: https://github.com/FadingRose/stellario/compare/v0.8.4...HEAD
+[Unreleased]: https://github.com/FadingRose/stellario/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/FadingRose/stellario/compare/v0.8.4...v0.9.0
+[0.8.4]: https://github.com/FadingRose/stellario/compare/v0.8.3...v0.8.4
 [0.8.4]: https://github.com/FadingRose/stellario/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/FadingRose/stellario/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/FadingRose/stellario/compare/v0.8.0...v0.8.2
