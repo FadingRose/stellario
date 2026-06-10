@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-06-10
+
+### Added
+
+- **`pending` task status.** New lifecycle state for tasks blocked mid-work. `in_progress → pending` (blocked), `pending → in_progress` (resumed). Semantically distinct from `cancelled` — pending tasks are expected to continue.
+- `status_reason` field on tasks. Optional reason attached to any status transition (e.g. "blocked by tb03", "dependency resolved"). Displayed in board and inject.
+- `taskboard_update` tool accepts optional `reason` parameter.
+- `pending` displayed in board (⏸ icon) and `buildStatus` inject, sorted between `in_progress` and `claimed`.
+
+### Changed
+
+- Task status lifecycle diagram updated:
+  ```
+  open → claimed → in_progress → review → done
+                          ↓  ↑            ↓
+                       pending        in_progress
+                          ↓
+                       cancelled
+  ```
+
 ## [0.8.3] - 2026-06-10
 
 ### Added
@@ -201,7 +221,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Telescope tool: unified search with text matching, tag filtering (`AND`/`OR`/`NOT`), and keyword enumeration modes.
 - Documentation: README, API reference, configuration guide, concepts guide.
 
-[Unreleased]: https://github.com/FadingRose/stellario/compare/v0.8.3...HEAD
+[Unreleased]: https://github.com/FadingRose/stellario/compare/v0.8.4...HEAD
+[0.8.4]: https://github.com/FadingRose/stellario/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/FadingRose/stellario/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/FadingRose/stellario/compare/v0.8.0...v0.8.2
 [0.8.0]: https://github.com/FadingRose/stellario/compare/v0.7.2...v0.8.0
