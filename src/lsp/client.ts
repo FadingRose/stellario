@@ -92,10 +92,17 @@ export class LspClient {
       const strategy = indexingConfig.strategy || "timeout"
       const timeout = indexingConfig.timeout || 30000
 
+      // Guard against settle-after-reject: overallTimeout may fire while
+      // waitForIndexing's internal setTimeout is still pending, causing the
+      // then-callback to overwrite state to "ready" after shutdown.
+      let settled = false
+      const doResolve = () => { if (!settled) { settled = true; resolve() } }
+      const doReject = (err: Error) => { if (!settled) { settled = true; reject(err) } }
+
       const overallTimeout = setTimeout(() => {
-        reject(new Error("LSP initialization timeout"))
+        doReject(new Error("LSP initialization timeout"))
         this.shutdown()
-      }, timeout)
+      }, timeout + 5000)  // grace period beyond indexing wait
 
       // ── Spawn ──
       this._stateDetail = `spawning: ${command.join(" ")}`
@@ -107,7 +114,7 @@ export class LspClient {
 
       if (!this.proc.stdin || !this.proc.stdout || !this.proc.stderr) {
         clearTimeout(overallTimeout)
-        reject(new Error("Failed to create stdio pipes"))
+        doReject(new Error("Failed to create stdio pipes"))
         return
       }
 
@@ -131,7 +138,7 @@ export class LspClient {
           this._state = "crashed"
           this._stateDetail = "process closed during startup"
           clearTimeout(overallTimeout)
-          reject(new Error("LSP process closed during startup"))
+          doReject(new Error("LSP process closed during startup"))
         } else if (this._state === "ready") {
           this._state = "crashed"
           this._stateDetail = "process closed"
@@ -142,7 +149,7 @@ export class LspClient {
         clearTimeout(overallTimeout)
         this._state = "error"
         this._stateDetail = `process error: ${err.message}`
-        reject(err)
+        doReject(err)
       })
 
       // ── Initialize ──
@@ -163,6 +170,7 @@ export class LspClient {
         },
         workspaceFolders: null,
       }).then(async () => {
+        if (settled) return  // already rejected (e.g. overallTimeout)
         this.sendNotification("initialized", {})
         this._stateDetail = "indexing"
 
@@ -172,10 +180,10 @@ export class LspClient {
         this._state = "ready"
         this._stateDetail = ""
         clearTimeout(overallTimeout)
-        resolve()
+        doResolve()
       }).catch((err) => {
         clearTimeout(overallTimeout)
-        reject(err)
+        doReject(err)
       })
     })
   }
@@ -311,7 +319,13 @@ export class LspClient {
     if (this._state === "starting") {
       throw new Error(`LSP indexing... (${this.formatElapsed()})`)
     }
-    if (this._state !== "ready") {
+    if (this._state !== "ready" || !this.proc) {
+      // Proc can be null while state is still "ready" if the exit/close
+      // event hasn't fired yet. Self-heal to crashed.
+      if (!this.proc && this._state === "ready") {
+        this._state = "crashed"
+        this._stateDetail = "process exited (detected on request)"
+      }
       throw new Error(`LSP not available (state: ${this._state})`)
     }
     return this.sendRequest(method, params, timeoutMs)
