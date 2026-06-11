@@ -12,6 +12,7 @@ import type { LspConfig, LspServerConfig, LspClientState } from "./types.js"
 // ─── Global State ────────────────────────────────────────────────────────────
 
 const clients = new Map<string, LspClient>()
+export const _managerId = Math.random().toString(36).slice(2, 8)
 
 /**
  * Get or create a client for the given server name.

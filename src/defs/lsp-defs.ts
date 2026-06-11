@@ -11,8 +11,8 @@ import { z } from "zod"
 import type { ToolContext, ToolDef } from "../types.js"
 import { resolveContext } from "../context.js"
 import { resolveAgent } from "../permissions.js"
-import { LspClient, uriToFilePath, readFileContext } from "../lsp/client.js"
-import { getOrCreateClient } from "../lsp/manager.js"
+import { LspClient, uriToFilePath, readFileContext, _getDebugInfo } from "../lsp/client.js"
+import { getOrCreateClient, _managerId } from "../lsp/manager.js"
 import type { LspLocation } from "../lsp/types.js"
 import { relative } from "path"
 
@@ -41,7 +41,7 @@ export function getLspToolDefs(): Record<string, ToolDef> {
     }
 
     if (client.state !== "ready") {
-      return `\u274c LSP not available (state: ${client.state}${client.stateDetail ? `, ${client.stateDetail}` : ""}). Restart the session to reconnect.`
+      return `\u274c LSP not available (state=${client.state}, detail=${client.stateDetail || "none"}). Restart the session to reconnect.`
     }
 
     return { client, rootPath: ctx.projectRoot }
@@ -327,10 +327,75 @@ export function getLspToolDefs(): Record<string, ToolDef> {
     },
   }
 
+  // ── lsp_debug ──
+
+  const lsp_debug: ToolDef = {
+    description:
+      "Internal LSP diagnostics. Returns raw client state, process info, " +
+      "and recent stderr output from the language server process. " +
+      "Used for debugging LSP connectivity issues.",
+    args: {
+      action: z.enum(["status", "restart"]).optional().describe("Action: 'status' (default) shows diagnostics, 'restart' kills and reinitializes."),
+    },
+    async execute(args, context: ToolContext) {
+      const ctx = resolveContext(context)
+      const agent = resolveAgent(context.agent, ctx.config)
+      if (!agent) return `\u274c Unknown agent: "${context.agent}"`
+
+      if ((args.action ?? "status") === "restart") {
+        const lspConfig = ctx.config.lsp
+        if (!lspConfig || Object.keys(lspConfig).length === 0) {
+          return "No LSP server configured."
+        }
+        const [name, serverConfig] = Object.entries(lspConfig)[0]
+        const client = getOrCreateClient(name, serverConfig)
+        const prevState = client.state
+        await client.shutdown()
+        // Re-init
+        const { triggerInit } = await import("../lsp/manager.js")
+        triggerInit(ctx.projectRoot, lspConfig)
+        return `LSP restart triggered. Previous state: ${prevState}. Wait a moment then check status.`
+      }
+
+      // ── status ──
+      const lspConfig = ctx.config.lsp
+      if (!lspConfig || Object.keys(lspConfig).length === 0) {
+        return "No LSP server configured."
+      }
+      const [name, serverConfig] = Object.entries(lspConfig)[0]
+      const client = getOrCreateClient(name, serverConfig)
+
+      const info = _getDebugInfo(client)
+      const lines: string[] = []
+      lines.push(`Server: ${name}`)
+      lines.push(`Command: ${serverConfig.command.join(" ")}`)
+      lines.push(`State: ${info.state}`)
+      lines.push(`State detail: ${info.stateDetail || "(none)"}`)
+      lines.push(`Instance: ${info.instanceId}`)
+      lines.push(`Has process: ${info.hasProc}`)
+      lines.push(`Has stdin: ${info.hasStdin}`)
+      lines.push(`Pending requests: ${info.pendingCount}`)
+      lines.push(`Buffer length: ${info.bufferLength}`)
+      lines.push(`Root path: ${info.rootPath}`)
+      lines.push(`Elapsed ms: ${info.elapsedMs}`)
+      lines.push(`Manager ID: ${_managerId}`)
+      if (info.stderrTail.length > 0) {
+        lines.push(``)
+        lines.push(`Server stderr (last ${info.stderrTail.length} lines):`)
+        for (const line of info.stderrTail) {
+          lines.push(`  ${line}`)
+        }
+      }
+
+      return lines.join("\n")
+    },
+  }
+
   return {
     lsp_references,
     lsp_definition,
     lsp_symbols,
     lsp_call_hierarchy,
+    lsp_debug,
   }
 }

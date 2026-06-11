@@ -16,6 +16,29 @@ import type {
   LspServerConfig,
 } from "./types.js"
 
+// ─── Debug State ─────────────────────────────────────────────────────────────
+const MAX_STDERR_LINES = 50
+const _stderrLines: string[] = []
+function _captureStderr(line: string): void {
+  _stderrLines.push(line)
+  if (_stderrLines.length > MAX_STDERR_LINES) _stderrLines.shift()
+}
+/** @internal */
+export function _getDebugInfo(client: LspClient): Record<string, any> {
+  return {
+    instanceId: (client as any)._instanceId,
+    state: (client as any)._state,
+    stateDetail: (client as any)._stateDetail,
+    hasProc: !!(client as any).proc,
+    hasStdin: !!(client as any).proc?.stdin,
+    pendingCount: (client as any).pending?.size ?? 0,
+    bufferLength: (client as any).buffer?.length ?? 0,
+    rootPath: (client as any)._rootPath,
+    elapsedMs: (client as any).elapsedMs,
+    stderrTail: _stderrLines.slice(-20),
+  }
+}
+
 // ─── JSON-RPC Plumbing ───────────────────────────────────────────────────────
 
 interface PendingRequest {
@@ -41,6 +64,7 @@ export class LspClient {
 
   // Config
   private config: LspServerConfig
+  private _instanceId = Math.random().toString(36).slice(2, 8)
 
   constructor(config: LspServerConfig) {
     this.config = config
@@ -78,6 +102,7 @@ export class LspClient {
 
     try {
       await this.doStart()
+      _captureStderr(`[start] success, instance=${this._instanceId}`)
     } catch (err: any) {
       this._state = "error"
       this._stateDetail = err.message || "unknown error"
@@ -92,10 +117,14 @@ export class LspClient {
       const strategy = indexingConfig.strategy || "timeout"
       const timeout = indexingConfig.timeout || 30000
 
+      let settled = false
+      const doResolve = () => { if (!settled) { settled = true; resolve() } }
+      const doReject = (err: Error) => { if (!settled) { settled = true; reject(err) } }
+
       const overallTimeout = setTimeout(() => {
-        reject(new Error("LSP initialization timeout"))
+        doReject(new Error("LSP initialization timeout"))
         this.shutdown()
-      }, timeout)
+      }, timeout + 5000)  // 5s grace beyond indexing wait
 
       // ── Spawn ──
       this._stateDetail = `spawning: ${command.join(" ")}`
@@ -107,7 +136,7 @@ export class LspClient {
 
       if (!this.proc.stdin || !this.proc.stdout || !this.proc.stderr) {
         clearTimeout(overallTimeout)
-        reject(new Error("Failed to create stdio pipes"))
+        doReject(new Error("Failed to create stdio pipes"))
         return
       }
 
@@ -116,11 +145,12 @@ export class LspClient {
         this.processBuffer()
       })
 
-      this.proc.stderr.on("data", () => {
-        // Silently ignore debug output
+      this.proc.stderr.on("data", (data: Buffer) => {
+        _captureStderr(data.toString().trim())
       })
 
-      this.proc.on("close", () => {
+      this.proc.on("close", (code, signal) => {
+        _captureStderr(`[close] code=${code}, signal=${signal}, prev_state=${this._state}, instance=${this._instanceId}`)
         for (const [, entry] of this.pending) {
           clearTimeout(entry.timeout)
           entry.reject(new Error("LSP process closed unexpectedly"))
@@ -129,12 +159,24 @@ export class LspClient {
         this.proc = null
         if (this._state === "starting") {
           this._state = "crashed"
-          this._stateDetail = "process closed during startup"
+          this._stateDetail = `process closed during startup (code=${code}, signal=${signal})`
           clearTimeout(overallTimeout)
-          reject(new Error("LSP process closed during startup"))
+          doReject(new Error("LSP process closed during startup"))
         } else if (this._state === "ready") {
           this._state = "crashed"
-          this._stateDetail = "process closed"
+          this._stateDetail = `process closed (code=${code}, signal=${signal})`
+        } else {
+          this._stateDetail = `process closed in state=${this._state} (code=${code}, signal=${signal})`
+        }
+      })
+
+      this.proc.on("exit", (code, signal) => {
+        // exit fires before close; capture for diagnostics
+        _captureStderr(`[exit] code=${code}, signal=${signal}, state=${this._state}, instance=${this._instanceId}`)
+        // Proactively mark crashed if process exited but close hasn't fired yet
+        if (this._state === "ready" && (code !== 0 || signal !== null)) {
+          this._state = "crashed"
+          this._stateDetail = `process exited (code=${code}, signal=${signal})`
         }
       })
 
@@ -142,7 +184,7 @@ export class LspClient {
         clearTimeout(overallTimeout)
         this._state = "error"
         this._stateDetail = `process error: ${err.message}`
-        reject(err)
+        doReject(err)
       })
 
       // ── Initialize ──
@@ -163,6 +205,7 @@ export class LspClient {
         },
         workspaceFolders: null,
       }).then(async () => {
+        if (settled) return  // already rejected (e.g. overallTimeout)
         this.sendNotification("initialized", {})
         this._stateDetail = "indexing"
 
@@ -172,10 +215,10 @@ export class LspClient {
         this._state = "ready"
         this._stateDetail = ""
         clearTimeout(overallTimeout)
-        resolve()
+        doResolve()
       }).catch((err) => {
         clearTimeout(overallTimeout)
-        reject(err)
+        doReject(err)
       })
     })
   }
@@ -311,8 +354,13 @@ export class LspClient {
     if (this._state === "starting") {
       throw new Error(`LSP indexing... (${this.formatElapsed()})`)
     }
-    if (this._state !== "ready") {
-      throw new Error(`LSP not available (state: ${this._state})`)
+    if (this._state !== "ready" || !this.proc) {
+      // Proc can be null while state is still "ready" if the close/exit event hasn't fired yet
+      if (!this.proc && this._state === "ready") {
+        this._state = "crashed"
+        this._stateDetail = "process exited (detected on request)"
+      }
+      throw new Error(`LSP not available (state=${this._state}, hasProc=${!!this.proc}, instance=${this._instanceId})`)
     }
     return this.sendRequest(method, params, timeoutMs)
   }
@@ -321,6 +369,10 @@ export class LspClient {
 
   async shutdown(): Promise<void> {
     if (!this.proc) return
+
+    // Capture who called shutdown for diagnostics
+    const stack = new Error().stack?.split("\n").slice(1, 4).map(s => s.trim()).join(" | ")
+    _captureStderr(`[shutdown] instance=${this._instanceId}, prev_state=${this._state}, caller=${stack || "unknown"}`)
 
     try {
       await this.sendRequest("shutdown", {}, 5000)
@@ -338,7 +390,6 @@ export class LspClient {
 
     this.proc = null
     this._state = "idle"
-    this._stateDetail = ""
   }
 
   // ── LSP Operations ──
