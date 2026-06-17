@@ -215,7 +215,7 @@ export function readIndex(memDir: string): KeywordIndexEntry[] {
 /**
  * Write all entries to the keyword index.
  */
-function writeIndex(memDir: string, entries: KeywordIndexEntry[]): void {
+export function writeIndex(memDir: string, entries: KeywordIndexEntry[]): void {
   if (!existsSync(memDir)) mkdirSync(memDir, { recursive: true })
   const path = indexPath(memDir)
   writeFileSync(

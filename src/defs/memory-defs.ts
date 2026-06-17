@@ -8,7 +8,13 @@ import {
   writeEntryMd, removeEntryMd, getEntryMdPath,
 } from "../store.js"
 import { gitCommit, gitLogEntry } from "../git.js"
-import { updateEntryIndex, removeEntryIndex, probeEmbeddingAvailability } from "../embedding.js"
+import {
+  updateEntryIndex, removeEntryIndex,
+  readIndex, embedBatch,
+  probeEmbeddingAvailability, getEmbeddingAvailability,
+  type KeywordIndexEntry,
+} from "../embedding.js"
+import { markPending, unmarkPending, triggerFlush } from "../index-worker.js"
 import { computeAutoRefs, applyAutoRefsPlan, type AutoRefsPlan } from "../auto-refs.js"
 
 // =============================================================================
@@ -60,6 +66,59 @@ function resolveDefaultVolume(agent: string, config: StellarioConfig): string | 
     if (def.profile !== "frozen") return name
   }
   return null
+}
+
+/**
+ * Build the keyword index map for auto-refs, including a freshly-embedded
+ * source entry so that newly-created / just-revised entries participate in
+ * semantic matching on the same operation that wrote them.
+ *
+ * Returns { map, available }:
+ *   - If embedding is unavailable or the index is empty, returns an empty map
+ *     and available=false. computeAutoRefs will then fall back to exact
+ *     keyword string matching (its built-in graceful degradation).
+ *   - Otherwise returns a map of {id → KeywordIndexEntry} populated from the
+ *     on-disk index, with the source entry's keywords embedded and inserted.
+ *
+ * This helper exists to fix a regression where the create/revise paths passed
+ * `embAvail=false` and an empty map unconditionally, causing auto-refs to
+ * never use semantic similarity even when the index was fully populated.
+ */
+async function buildKwIndexForAutoRefs(
+  memDir: string,
+  source: MemoryEntry,
+): Promise<{ map: Map<string, KeywordIndexEntry>; available: boolean }> {
+  // Lazy probe: if availability has never been checked in this process,
+  // probe now (async). Subsequent calls hit the cached "available" state.
+  if (getEmbeddingAvailability() === "unknown") {
+    await probeEmbeddingAvailability()
+  }
+  if (getEmbeddingAvailability() !== "available") return { map: new Map(), available: false }
+
+  const indexed = readIndex(memDir)
+  if (indexed.length === 0 && source.keywords.length === 0) {
+    return { map: new Map(), available: false }
+  }
+
+  const map = new Map<string, KeywordIndexEntry>()
+  for (const entry of indexed) map.set(entry.id, entry)
+
+  // Embed the source entry's keywords synchronously so it participates in
+  // semantic matching on this very create/revise. (The on-disk index is
+  // updated asynchronously after the write, so without this the source
+  // would have no vectors during its own auto-refs computation.)
+  if (source.keywords.length > 0) {
+    try {
+      const vectors = await embedBatch(source.keywords)
+      map.set(source.id, { id: source.id, keywords: source.keywords, vectors })
+    } catch {
+      // Embedding failed at runtime — fall back to whatever index we have.
+      // Source won't have vectors, but candidates still do; matchKeywords
+      // handles missing source vectors by returning null for that pair.
+    }
+  }
+
+  return { map, available: true }
 }
 
 // =============================================================================
@@ -129,8 +188,7 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       // Auto-refs: find bidirectional links before writing (CL-8/CL-10)
       let autoRefChangedIds: string[] = []
       if (def.autoRefs?.enabled) {
-        const embAvail = false // Use text fallback for create (index not yet updated)
-        const kwIndexMap = new Map<string, import("../embedding.js").KeywordIndexEntry>()
+        const { map: kwIndexMap, available: embAvail } = await buildKwIndexForAutoRefs(ctx.memDir, entry)
         const plan = computeAutoRefs(entry, entries, ctx.config, embAvail, kwIndexMap)
         autoRefChangedIds = applyAutoRefsPlan(plan, entries, entry.id)
       }
@@ -154,9 +212,10 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         ctx.config, [id, ...autoRefChangedIds],
       )
 
-      // Update keyword index (async, non-blocking)
+      // Mark for background indexing (batch-flushed, fire-and-forget)
       if (keywords.length > 0) {
-        updateEntryIndex(ctx.memDir, id, keywords).catch(() => {})
+        markPending(ctx.memDir, id)
+        triggerFlush(ctx.memDir, ctx.config)
       }
 
       const lines = [
@@ -345,8 +404,7 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       let autoRefChangedIds: string[] = []
       const autoRefEnabled = ctx.config.volumes[volume]?.autoRefs?.enabled
       if (autoRefEnabled && (tagsChanged || keywordsChanged)) {
-        const embAvail = false // Use text fallback (consistent with create)
-        const kwIndexMap = new Map<string, import("../embedding.js").KeywordIndexEntry>()
+        const { map: kwIndexMap, available: embAvail } = await buildKwIndexForAutoRefs(ctx.memDir, updatedEntry)
         const plan = computeAutoRefs(updatedEntry, entries, ctx.config, embAvail, kwIndexMap)
         autoRefChangedIds = applyAutoRefsPlan(plan, entries, updatedEntry.id)
       }
@@ -361,9 +419,10 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         if (changed) writeEntryMd(ctx.memDir, volume, changed)
       }
 
-      // Re-index keywords if changed (async, non-blocking)
+      // Mark for background indexing if content or keywords changed
       if ((edits.length > 0 || keywordsChanged) && updatedEntry.keywords.length > 0) {
-        updateEntryIndex(ctx.memDir, args.id, updatedEntry.keywords).catch(() => {})
+        markPending(ctx.memDir, args.id)
+        triggerFlush(ctx.memDir, ctx.config)
       }
 
       const allChangedIds = [args.id, ...autoRefChangedIds]
@@ -429,8 +488,9 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       archivedEntries.push(archivedEntry)
       writeEntries(ctx.memDir, "archived", archivedEntries, ctx.config)
 
-      // Remove from keyword index
+      // Remove from keyword index and pending
       removeEntryIndex(ctx.memDir, args.id)
+      unmarkPending(ctx.memDir, args.id)
 
       // Per-entry md: remove from source volume, create in archived
       removeEntryMd(ctx.memDir, volume, args.id)

@@ -13,6 +13,7 @@ import {
   type KeywordIndexEntry,
 } from "../embedding.js"
 import { readLinkedVolume } from "./volume-link-defs.js"
+import { hasPending, flushIndexWorker } from "../index-worker.js"
 import { existsSync, readFileSync, readlinkSync } from "fs"
 import { join } from "path"
 
@@ -93,6 +94,27 @@ function matchTags(entry: MemoryEntry, tags?: string[], tagsAny?: string[], tags
 // Tool Definition
 // =============================================================================
 
+/**
+ * Sanitize an optional string argument.
+ *
+ * opencode's tool bridge sometimes encodes "empty string" as the literal
+ * string '""' (two double-quote characters) rather than an actual empty
+ * string or undefined. This normalizes such values to undefined so they
+ * are treated as "not provided" rather than as a filter criterion.
+ *
+ * Also treats actual empty strings, whitespace-only strings, and the
+ * literal strings "undefined"/"null" as absent.
+ */
+function sanitizeOptionalString(val: unknown): string | undefined {
+  if (typeof val !== "string") return undefined
+  const trimmed = val.trim()
+  if (trimmed === "" || trimmed === '""' || trimmed === "''" ||
+      trimmed === "undefined" || trimmed === "null") {
+    return undefined
+  }
+  return trimmed
+}
+
 export function getTelescopeToolDefs(): Record<string, ToolDef> {
   const search: ToolDef = {
     description:
@@ -124,7 +146,9 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
       const queryTagsAny = ensureStringArray(args.tags_any)
       const queryTagsNot = ensureStringArray(args.tags_not)
 
-      const queryAuthor = args.author?.trim().toLowerCase() || undefined
+      // Sanitize optional strings: opencode may encode "" as literal '""'
+      const query = sanitizeOptionalString(args.query)
+      const queryAuthor = sanitizeOptionalString(args.author)?.toLowerCase()
 
       const ctx = resolveContext(context)
       const agent = resolveAgent(context.agent, ctx.config)
@@ -137,6 +161,14 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
       // Configure embedding model from config
       if (ctx.config.embedding?.model) {
         setModelId(ctx.config.embedding.model)
+      }
+
+      // Sync-flush any pending index updates before searching, so the index
+      // is complete at query time. Fire-and-forget flushes from concurrent
+      // create/revise calls may leave the index slightly behind; this guarantees
+      // consistency for this search.
+      if (hasPending(ctx.memDir)) {
+        await flushIndexWorker(ctx.memDir, ctx.config)
       }
 
       const allVolumes = Object.keys(ctx.config.volumes)
@@ -208,8 +240,8 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
         if (queryTags.length || queryTagsAny.length || queryTagsNot.length) {
           filtered = filtered.filter(({ entry }) => matchTags(entry, queryTags, queryTagsAny, queryTagsNot))
         }
-        if (args.query) {
-          const prefix = args.query.toLowerCase()
+        if (query) {
+          const prefix = query.toLowerCase()
           filtered = filtered.filter(({ entry }) =>
             entry.tags.some(t => t.toLowerCase().startsWith(prefix))
           )
@@ -227,7 +259,7 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
       // Keyword enumeration mode
       if (args.returns === "keywords") {
         // Semantic keyword discovery (if embedding available + query provided)
-        if (args.query) {
+        if (query) {
           const embeddingAvailable = await probeEmbeddingAvailability()
           if (embeddingAvailable) {
             // Auto-rebuild index if empty
@@ -240,7 +272,7 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
             }
 
             try {
-              const semResults = await semanticSearch(ctx.memDir, args.query, (args.limit || 50) * 2, linkedKeywordIndices.length > 0 ? linkedKeywordIndices : undefined)
+              const semResults = await semanticSearch(ctx.memDir, query, (args.limit || 50) * 2, linkedKeywordIndices.length > 0 ? linkedKeywordIndices : undefined)
               if (semResults.length > 0) {
                 // Build keyword scores from semantic results
                 const kwScores = new Map<string, number>()
@@ -267,8 +299,8 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
         if (queryTags.length || queryTagsAny.length || queryTagsNot.length) {
           filtered = filtered.filter(({ entry }) => matchTags(entry, queryTags, queryTagsAny, queryTagsNot))
         }
-        if (args.query) {
-          const queryLower = args.query.toLowerCase()
+        if (query) {
+          const queryLower = query.toLowerCase()
           filtered = filtered.filter(({ entry }) =>
             (entry.keywords || []).some(k => k.toLowerCase().includes(queryLower))
           )
@@ -286,13 +318,13 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
       // Entry search mode
       let results: SearchResult[] = []
 
-      if (!args.query && (queryTags.length || queryTagsAny.length || queryTagsNot.length)) {
+      if (!query && (queryTags.length || queryTagsAny.length || queryTagsNot.length)) {
         results = allEntries
           .filter(({ entry }) => matchTags(entry, queryTags, queryTagsAny, queryTagsNot))
           .map(({ entry, volume }) => ({ entry, volume, score: 1 }))
       }
-      else if (args.query) {
-        const terms = args.query.split(/\s+/).filter(Boolean)
+      else if (query) {
+        const terms = query.split(/\s+/).filter(Boolean)
 
         // Fzf signal (text matching)
         const fzfResults = allEntries

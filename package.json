@@ -27,7 +27,8 @@
     "./coord/store": "./src/coord/store.ts",
     "./lsp/types": "./src/lsp/types.ts",
     "./lsp/client": "./src/lsp/client.ts",
-    "./lsp/manager": "./src/lsp/manager.ts"
+    "./lsp/manager": "./src/lsp/manager.ts",
+    "./index-worker": "./src/index-worker.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.0.0",

@@ -12,3 +12,4 @@ export { computeAutoRefs, applyAutoRefsPlan, hasTagOverlap, isRefsRemovedBlocked
 export type { AutoRefsPlan, AutoRefPair, AutoRefRemove } from "./auto-refs.js"
 export type { AutoRefsConfig, LinkedVolume } from "./types.js"
 export { triggerInit as triggerLspInit, getLspStatus, shutdownAll as shutdownAllLsp } from "./lsp/manager.js"
+export { recoverOnLoad, markPending, unmarkPending, hasPending, flushIndexWorker, triggerFlush } from "./index-worker.js"
