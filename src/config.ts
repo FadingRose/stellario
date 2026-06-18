@@ -93,31 +93,38 @@ function validateConfig(raw: any, sourcePath: string): StellarioConfig {
     throw new Error(`Invalid config: "volumes" is required and must be an object.`)
   }
 
-  const volumes: Record<string, VolumeDef> = {}
   const validProfiles: Profile[] = ["mutable", "append", "scratch", "frozen", "workspace"]
+  // Intermediate storage: system volumes may not have boundaries in user config
+  const userVolumes: Record<string, Partial<VolumeDef> & { profile: Profile }> = {}
 
   for (const [name, def] of Object.entries(raw.volumes)) {
-    // System volumes are reserved — silently override user definition
-    if (SYSTEM_VOLUME_NAMES.has(name)) continue
-
     const v = def as Record<string, any>
+    const isSystem = SYSTEM_VOLUME_NAMES.has(name)
 
-    if (!v.profile || !validProfiles.includes(v.profile)) {
+    // System volumes: profile is locked, but other fields (boundaries,
+    // requiredTagPrefix, autoRefs, etc.) can be customized by user.
+    // Non-system volumes: user must specify profile.
+    const profile = isSystem
+      ? SYSTEM_VOLUMES[name].profile  // locked
+      : v.profile
+
+    if (!profile || !validProfiles.includes(profile)) {
       throw new Error(
-        `Volume "${name}": profile must be one of ${validProfiles.join(", ")}, got "${v.profile}"`
+        `Volume "${name}": profile must be one of ${validProfiles.join(", ")}, got "${profile}"`
       )
     }
 
-    if (!v.boundaries || typeof v.boundaries !== "object") {
+    // System volumes don't require boundaries in user config (system provides defaults)
+    if (!isSystem && (!v.boundaries || typeof v.boundaries !== "object")) {
       throw new Error(`Volume "${name}": "boundaries" is required.`)
     }
 
-    volumes[name] = {
-      profile: v.profile,
-      boundaries: {
+    userVolumes[name] = {
+      profile,
+      boundaries: v.boundaries ? {
         read: normalizeAgentList(v.boundaries.read),
         write: normalizeAgentList(v.boundaries.write),
-      },
+      } : undefined,
       authority: v.authority,
       requiredTagPrefix: v.requiredTagPrefix,
       idPrefix: v.idPrefix,
@@ -125,9 +132,33 @@ function validateConfig(raw: any, sourcePath: string): StellarioConfig {
     }
   }
 
-  // Merge system volumes (reserved keywords, not overridable by user)
-  for (const [name, def] of Object.entries(SYSTEM_VOLUMES)) {
-    volumes[name] = { ...def }
+  const volumes: Record<string, VolumeDef> = {}
+
+  // Non-system volumes from user (must have boundaries)
+  for (const [name, def] of Object.entries(userVolumes)) {
+    if (!SYSTEM_VOLUME_NAMES.has(name)) {
+      volumes[name] = def as VolumeDef
+    }
+  }
+
+  // Merge system volumes: system provides defaults, user overrides non-profile fields
+  for (const [name, sysDef] of Object.entries(SYSTEM_VOLUMES)) {
+    const userDef = userVolumes[name]
+    if (userDef) {
+      // User defined this system volume — merge:
+      // system provides profile + idPrefix defaults,
+      // user overrides boundaries, requiredTagPrefix, autoRefs, authority
+      volumes[name] = {
+        profile: sysDef.profile,         // always locked
+        boundaries: userDef.boundaries || sysDef.boundaries,
+        authority: userDef.authority || sysDef.authority,
+        requiredTagPrefix: userDef.requiredTagPrefix || sysDef.requiredTagPrefix,
+        idPrefix: sysDef.idPrefix,       // idPrefix locked for system volumes
+        autoRefs: userDef.autoRefs || sysDef.autoRefs,
+      }
+    } else {
+      volumes[name] = { ...sysDef }
+    }
   }
 
   // Validate idPrefix uniqueness across all volumes (system + user)
