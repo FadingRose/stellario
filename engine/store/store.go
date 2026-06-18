@@ -3,6 +3,8 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -13,6 +15,16 @@ import (
 // Store wraps a SQLite database for memory entries and graph edges.
 type Store struct {
 	db *sql.DB
+}
+
+// OpenForProject opens or creates a SQLite database inside the stellario directory.
+// The database is placed at <stellarioDir>/stellario.db, alongside JSONL files.
+func OpenForProject(stellarioDir string) (*Store, error) {
+	if err := os.MkdirAll(stellarioDir, 0755); err != nil {
+		return nil, fmt.Errorf("create stellario dir: %w", err)
+	}
+	dbPath := filepath.Join(stellarioDir, "stellario.db")
+	return Open(dbPath)
 }
 
 // Open opens or creates a SQLite database at the given path.
@@ -83,6 +95,31 @@ func (s *Store) migrate() error {
 		volume     TEXT PRIMARY KEY,
 		next_nonce INTEGER NOT NULL DEFAULT 1
 	);
+
+	CREATE TABLE IF NOT EXISTS hint_translations (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		hint       TEXT NOT NULL,
+		bid        TEXT,
+		translated TEXT NOT NULL,
+		applied    INTEGER NOT NULL DEFAULT 1,
+		feedback   TEXT DEFAULT NULL,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_hint_trans_hint ON hint_translations(hint);
+
+	CREATE TABLE IF NOT EXISTS hint_corrections (
+		id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+		hint                  TEXT NOT NULL,
+		bad_translation       TEXT NOT NULL,
+		good_translation      TEXT NOT NULL,
+		reason                TEXT NOT NULL,
+		source_translation_id INTEGER DEFAULT NULL,
+		created_at            TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at            TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_hint_corrections_hint ON hint_corrections(hint);
 	`
 	_, err := s.db.Exec(schema)
 	return err
@@ -376,4 +413,124 @@ func fromJSON(s string) []string {
 		}
 	}
 	return result
+}
+
+// ── Hint Translation Log ────────────────────────────────────────────────────
+
+// HintTranslation records a single hint-to-operation translation.
+type HintTranslation struct {
+	ID         int64  `json:"id"`
+	Hint       string `json:"hint"`
+	Bid        string `json:"bid,omitempty"`
+	Translated string `json:"translated"` // JSON string of the structured operation
+	Applied    bool   `json:"applied"`
+	Feedback   string `json:"feedback,omitempty"` // "", "good", "bad"
+	CreatedAt  string `json:"created_at"`
+}
+
+// LogHintTranslation records that a hint was translated and applied.
+func (s *Store) LogHintTranslation(hint, bid, translated string, applied bool) (int64, error) {
+	appliedInt := 0
+	if applied {
+		appliedInt = 1
+	}
+	res, err := s.db.Exec(
+		`INSERT INTO hint_translations (hint, bid, translated, applied) VALUES (?, ?, ?, ?)`,
+		hint, bid, translated, appliedInt,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("log hint translation: %w", err)
+	}
+	return res.LastInsertId()
+}
+
+// RecentHintTranslations returns the most recent translations.
+func (s *Store) RecentHintTranslations(limit int) ([]HintTranslation, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := s.db.Query(
+		`SELECT id, hint, bid, translated, applied, COALESCE(feedback, ''), created_at
+		 FROM hint_translations ORDER BY created_at DESC LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []HintTranslation
+	for rows.Next() {
+		var t HintTranslation
+		var appliedInt int
+		if err := rows.Scan(&t.ID, &t.Hint, &t.Bid, &t.Translated, &appliedInt, &t.Feedback, &t.CreatedAt); err != nil {
+			return nil, err
+		}
+		t.Applied = appliedInt == 1
+		result = append(result, t)
+	}
+	return result, rows.Err()
+}
+
+// SetHintFeedback marks a translation as good or bad.
+func (s *Store) SetHintFeedback(id int64, feedback string) error {
+	_, err := s.db.Exec(`UPDATE hint_translations SET feedback = ? WHERE id = ?`, feedback, id)
+	return err
+}
+
+// ── Hint Corrections ────────────────────────────────────────────────────────
+
+// HintCorrection is an agent-written correction for a bad translation.
+type HintCorrection struct {
+	ID                  int64  `json:"id"`
+	Hint                string `json:"hint"`
+	BadTranslation      string `json:"bad_translation"`
+	GoodTranslation     string `json:"good_translation"`
+	Reason              string `json:"reason"`
+	SourceTranslationID int64  `json:"source_translation_id,omitempty"`
+	CreatedAt           string `json:"created_at"`
+}
+
+// AddHintCorrection records a bad case correction.
+func (s *Store) AddHintCorrection(c HintCorrection) (int64, error) {
+	res, err := s.db.Exec(
+		`INSERT INTO hint_corrections (hint, bad_translation, good_translation, reason, source_translation_id)
+		 VALUES (?, ?, ?, ?, ?)`,
+		c.Hint, c.BadTranslation, c.GoodTranslation, c.Reason, c.SourceTranslationID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("add hint correction: %w", err)
+	}
+	return res.LastInsertId()
+}
+
+// AllHintCorrections returns all corrections (for small model spec injection).
+func (s *Store) AllHintCorrections() ([]HintCorrection, error) {
+	rows, err := s.db.Query(
+		`SELECT id, hint, bad_translation, good_translation, reason, COALESCE(source_translation_id, 0), created_at
+		 FROM hint_corrections ORDER BY created_at ASC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []HintCorrection
+	for rows.Next() {
+		var c HintCorrection
+		if err := rows.Scan(&c.ID, &c.Hint, &c.BadTranslation, &c.GoodTranslation, &c.Reason, &c.SourceTranslationID, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, c)
+	}
+	return result, rows.Err()
+}
+
+// UpdateHintCorrection revises an existing correction.
+func (s *Store) UpdateHintCorrection(id int64, goodTranslation, reason string) error {
+	_, err := s.db.Exec(
+		`UPDATE hint_corrections SET good_translation = ?, reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		goodTranslation, reason, id,
+	)
+	return err
 }
