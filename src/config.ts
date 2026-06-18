@@ -7,6 +7,50 @@ import { profileBehavior } from "./types.js"
 const CONFIG_FILENAME = "stellario.yaml"
 
 // =============================================================================
+// System Volumes (reserved keywords — user cannot override)
+// =============================================================================
+//
+// These volumes are required for stellario's core functionality. They are
+// automatically injected into every config at load time. If a user defines
+// a volume with the same name in stellario.yaml, the user definition is
+// ignored with a warning.
+//
+// Semantics: system volumes are agent-isolated by default — every agent
+// can read and write, but runtime author-filtering ensures each agent only
+// sees their own entries (except archived which is shared history).
+//
+//   archived  (frozen)    — destination for forgotten entries
+//   meta      (mutable)   — behavioral calibrations, type:prompt injection
+//   handover  (append)    — session handoff logs (immutable per entry)
+//   layer     (workspace) — roadmap + workspace entries
+
+const SYSTEM_VOLUMES: Record<string, VolumeDef> = {
+  archived: {
+    profile: "frozen",
+    boundaries: { read: ["all"], write: [] },
+    idPrefix: "z",
+  },
+  meta: {
+    profile: "mutable",
+    boundaries: { read: ["all"], write: ["all"] },
+    idPrefix: "m",
+  },
+  handover: {
+    profile: "append",
+    boundaries: { read: ["all"], write: ["all"] },
+    idPrefix: "h",
+  },
+  layer: {
+    profile: "workspace",
+    boundaries: { read: ["all"], write: ["all"] },
+    idPrefix: "l",
+  },
+}
+
+/** Set of reserved volume names for quick lookup. */
+export const SYSTEM_VOLUME_NAMES = new Set(Object.keys(SYSTEM_VOLUMES))
+
+// =============================================================================
 // Config Loading
 // =============================================================================
 
@@ -53,6 +97,12 @@ function validateConfig(raw: any, sourcePath: string): StellarioConfig {
   const validProfiles: Profile[] = ["mutable", "append", "scratch", "frozen", "workspace"]
 
   for (const [name, def] of Object.entries(raw.volumes)) {
+    // System volumes are reserved — warn and skip user definition
+    if (SYSTEM_VOLUME_NAMES.has(name)) {
+      console.warn(`Warning: "${name}" is a reserved system volume — user definition ignored. System defaults will be used.`)
+      continue
+    }
+
     const v = def as Record<string, any>
 
     if (!v.profile || !validProfiles.includes(v.profile)) {
@@ -75,6 +125,28 @@ function validateConfig(raw: any, sourcePath: string): StellarioConfig {
       requiredTagPrefix: v.requiredTagPrefix,
       idPrefix: v.idPrefix,
       autoRefs: v.autoRefs,
+    }
+  }
+
+  // Merge system volumes (reserved keywords, not overridable by user)
+  for (const [name, def] of Object.entries(SYSTEM_VOLUMES)) {
+    volumes[name] = { ...def }
+  }
+
+  // Validate idPrefix uniqueness across all volumes (system + user)
+  const prefixToVolumes = new Map<string, string[]>()
+  for (const [name, def] of Object.entries(volumes)) {
+    const prefix = def.idPrefix || name.charAt(0)
+    const existing = prefixToVolumes.get(prefix) || []
+    existing.push(name)
+    prefixToVolumes.set(prefix, existing)
+  }
+  for (const [prefix, volNames] of prefixToVolumes) {
+    if (volNames.length > 1) {
+      throw new Error(
+        `idPrefix conflict: prefix "${prefix}" is used by volumes: ${volNames.join(", ")}. ` +
+        `Each volume must have a unique idPrefix (set explicitly via idPrefix: in config).`
+      )
     }
   }
 

@@ -16,6 +16,7 @@ import {
 } from "../embedding.js"
 import { markPending, unmarkPending, triggerFlush } from "../index-worker.js"
 import { computeAutoRefs, applyAutoRefsPlan, type AutoRefsPlan } from "../auto-refs.js"
+import { SYSTEM_VOLUME_NAMES } from "../config.js"
 
 // =============================================================================
 // Shared Helpers
@@ -49,20 +50,21 @@ function formatContent(content: string): string {
 }
 
 /**
- * Find the default volume for an agent: first writable mutable (non-workspace) volume.
+ * Find the default volume for an agent: first writable mutable (non-system) volume.
+ * System volumes (meta, handover, layer) are never used as default.
  */
 function resolveDefaultVolume(agent: string, config: StellarioConfig): string | null {
   const writable = writableVolumes(agent, config)
   for (const name of writable) {
     const def = config.volumes[name]
-    // Skip meta (reserved for behavioral calibrations) and workspace (has its own tools)
-    if (name === "meta") continue
+    // Skip system volumes — they have dedicated tools and semantics
+    if (SYSTEM_VOLUME_NAMES.has(name)) continue
     if (def.profile === "mutable") return name
   }
-  // Fallback: first writable that accepts creates
+  // Fallback: first writable non-system volume that accepts creates
   for (const name of writable) {
     const def = config.volumes[name]
-    if (name === "meta") continue
+    if (SYSTEM_VOLUME_NAMES.has(name)) continue
     if (def.profile !== "frozen") return name
   }
   return null
