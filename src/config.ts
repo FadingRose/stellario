@@ -97,11 +97,8 @@ function validateConfig(raw: any, sourcePath: string): StellarioConfig {
   const validProfiles: Profile[] = ["mutable", "append", "scratch", "frozen", "workspace"]
 
   for (const [name, def] of Object.entries(raw.volumes)) {
-    // System volumes are reserved — warn and skip user definition
-    if (SYSTEM_VOLUME_NAMES.has(name)) {
-      console.warn(`Warning: "${name}" is a reserved system volume — user definition ignored. System defaults will be used.`)
-      continue
-    }
+    // System volumes are reserved — silently override user definition
+    if (SYSTEM_VOLUME_NAMES.has(name)) continue
 
     const v = def as Record<string, any>
 
@@ -176,7 +173,7 @@ function validateConfig(raw: any, sourcePath: string): StellarioConfig {
   for (const [volName, volDef] of Object.entries(volumes)) {
     for (const agent of [...volDef.boundaries.read, ...volDef.boundaries.write]) {
       if (!knownAgents.has(agent)) {
-        console.warn(`Warning: Volume "${volName}" references unknown agent "${agent}" in boundaries.`)
+        // Silently skip — unknown agent in boundaries is non-fatal
       }
     }
   }
