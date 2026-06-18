@@ -189,12 +189,13 @@ describe("Stress 4: Rapid Revision", () => {
       // Verify: exactly one auto link exists (to the current tag match)
       const autoLinks = source.refs!.filter(r => r.source === "auto")
       expect(autoLinks.length).toBe(1)
-      expect(autoLinks[0].target).toBe(`e${String(tagIdx).padStart(4, "0")}`)
+      expect(autoLinks[0].target).toBe(`test:${String(tagIdx).padStart(4, "0")}`)
 
       // Verify reverse link
       const target = entries[tagIdx]
+      const sourceDisplayId = `test:${source.id.slice(1)}`
       const reverse = target.refs!.filter(r =>
-        r.target === source.id && r.source === "auto"
+        (r.target === source.id || r.target === sourceDisplayId) && r.source === "auto"
       )
       expect(reverse.length).toBe(1)
     }
@@ -271,7 +272,7 @@ describe("Stress 6: applyAutoRefsPlan at Scale", () => {
     expect(source.refs!.length).toBe(200)
     for (const e of entries.slice(0, 200)) {
       expect(e.refs!.length).toBe(1) // Each has the reverse link
-      expect(e.refs![0].target).toBe(source.id)
+      expect(e.refs![0].target).toBe(`test:${source.id.slice(1)}`)
       expect(e.refs![0].source).toBe("auto")
     }
 

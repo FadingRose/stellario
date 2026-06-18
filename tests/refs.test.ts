@@ -379,9 +379,9 @@ describe("Integration: auto_refs end-to-end", () => {
 
     // Both entries should have the auto ref
     expect(source.refs?.length).toBe(1)
-    expect(source.refs![0]).toEqual({ target: "l02", reason: "auto: test", source: "auto" })
+    expect(source.refs![0]).toEqual({ target: "layer:02", reason: "auto: test", source: "auto" })
     expect(target.refs?.length).toBe(1)
-    expect(target.refs![0]).toEqual({ target: "l01", reason: "auto: test", source: "auto" })
+    expect(target.refs![0]).toEqual({ target: "layer:01", reason: "auto: test", source: "auto" })
     expect(changed).toContain("l01")
     expect(changed).toContain("l02")
   })

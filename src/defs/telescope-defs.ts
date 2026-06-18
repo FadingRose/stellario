@@ -2,7 +2,7 @@ import { z } from "zod"
 import type { ToolContext, MemoryEntry, ToolDef, LinkedVolume } from "../types.js"
 import { resolveContext } from "../context.js"
 import { resolveAgent, canRead } from "../permissions.js"
-import { readJsonl, extractTitle, truncate, ensureStringArray, getLinkedVolumes } from "../store.js"
+import { readJsonl, extractTitle, truncate, ensureStringArray, getLinkedVolumes, formatDisplayId } from "../store.js"
 import {
   probeEmbeddingAvailability,
   semanticSearch,
@@ -407,7 +407,7 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
 
       return results.map(({ entry, volume, score }) => {
         const title = extractTitle(entry.content)
-        return `[${entry.id}] ${volume} ${score.toFixed(0)} \u2014 ${title}`
+        return `[${formatDisplayId({ ...entry, volume })}] ${volume} ${score.toFixed(0)} — ${title}`
       }).join("\n")
     },
   }

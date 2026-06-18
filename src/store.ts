@@ -296,26 +296,98 @@ function bumpNonce(memDir: string, volume: string): number | null {
 }
 
 // =============================================================================
+// Display ID (namespace format: "volume:number")
+// =============================================================================
+//
+// Storage IDs are short: "a01", "m02", "l04" (prefix + number).
+// Display IDs include the volume name: "active:01", "meta:02", "layer:04".
+//
+// Agent-facing tools accept display IDs. Internal ref targets may store
+// either format (old refs use short IDs, new refs use display IDs).
+// findEntry handles both transparently.
+
+/**
+ * Convert a stored entry to its display ID: "volume:number".
+ * Uses entry.volume field + id tail (strip first char = prefix).
+ */
+export function formatDisplayId(entry: MemoryEntry): string {
+  return `${entry.volume}:${entry.id.slice(1)}`
+}
+
+/**
+ * Convert a stored id + volume name to display ID.
+ */
+export function toDisplayId(storedId: string, volume: string): string {
+  return `${volume}:${storedId.slice(1)}`
+}
+
+/**
+ * Check if an ID string is in display format (contains ":").
+ */
+export function isDisplayId(id: string): boolean {
+  return id.includes(":")
+}
+
+/**
+ * Parse a display ID ("active:01") into { volume, storedId }.
+ * Uses config to resolve the volume's idPrefix for generating storedId.
+ * Returns null if the display ID is malformed or volume unknown.
+ */
+export function parseDisplayId(
+  displayId: string,
+  config: StellarioConfig,
+): { volume: string; storedId: string } | null {
+  const colonIdx = displayId.indexOf(":")
+  if (colonIdx === -1) return null
+
+  const volume = displayId.slice(0, colonIdx)
+  const num = displayId.slice(colonIdx + 1)
+  const def = config.volumes[volume]
+  if (!def) return null
+
+  const prefix = def.idPrefix || volume.charAt(0)
+  return { volume, storedId: `${prefix}${num}` }
+}
+
+// =============================================================================
 // Lookup
 // =============================================================================
 
 /**
  * Find an entry by ID across all volumes.
- * Uses ID prefix for faster lookup when possible.
+ *
+ * Accepts two formats:
+ *   - Display format: "active:01" (preferred — direct volume lookup)
+ *   - Short format: "a01" (legacy — uses prefix derivation for backward compat
+ *     with old ref targets; may be ambiguous if prefixes collide)
  */
 export function findEntry(
   memDir: string,
   id: string,
   config: StellarioConfig,
 ): { entry: MemoryEntry; volume: string } | null {
+  // Display format: "volume:number" → direct lookup
+  if (isDisplayId(id)) {
+    const parsed = parseDisplayId(id, config)
+    if (!parsed) return null
+    const { volume, storedId } = parsed
+    const entries = readJsonl(memDir, volume)
+    const found = entries.find((e) => e.id === storedId)
+    if (found) return { entry: found, volume }
+    // Also check archived (entry may have been forgotten)
+    const archived = readJsonl(memDir, "archived")
+    const archivedFound = archived.find((e) => e.id === storedId)
+    if (archivedFound) return { entry: archivedFound, volume: "archived" }
+    return null
+  }
+
+  // Short format: "a01" → prefix derivation (legacy backward compat)
   const volumes = Object.keys(config.volumes)
-  // Try to guess volume from ID prefix
   const candidateVolume = volumeFromId(id, config)
   const searchOrder = candidateVolume
     ? [candidateVolume, ...volumes.filter((v) => v !== candidateVolume)]
     : volumes
 
-  // Also check archived
   searchOrder.push("archived")
 
   for (const vol of searchOrder) {

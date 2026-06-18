@@ -6,6 +6,7 @@ import {
   readJsonl, writeEntries, generateNextId, findEntry,
   today, truncate, extractTitle, dedupeTags, ensureStringArray, ensureArray,
   writeEntryMd, removeEntryMd, getEntryMdPath,
+  formatDisplayId, toDisplayId,
 } from "../store.js"
 import { gitCommit, gitLogEntry } from "../git.js"
 import {
@@ -206,7 +207,10 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       }
 
       const autoRefNote = autoRefChangedIds.length > 1
-        ? `\n[auto_refs: ${autoRefChangedIds.filter(id => id !== entry.id).map(id => `↔${id}`).join(", ")}]`
+        ? `\n[auto_refs: ${autoRefChangedIds.filter(cid => cid !== entry.id).map(cid => {
+            const e = entries.find(e => e.id === cid)
+            return `↔${e ? toDisplayId(e.id, e.volume) : cid}`
+          }).join(", ")}]`
         : ""
       const commitHash = gitCommit(
         ctx.memDir, volumeName,
@@ -220,8 +224,9 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         triggerFlush(ctx.memDir, ctx.config)
       }
 
+      const displayId = toDisplayId(id, volumeName)
       const lines = [
-        `Created [${id}] → ${volumeName}`,
+        `Created [${displayId}] → ${volumeName}`,
         `Author: ${agent}`,
         `Tags: ${tags.length > 0 ? tags.join(", ") : "(none)"}`,
         commitHash ? `Commit: ${commitHash}` : "(volume not version-controlled)",
@@ -254,7 +259,7 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       }
 
       const lines: string[] = [
-        `\u2501\u2501\u2501 [${entry.id}] \u2500\u2500\u2500 ${volume} \u2500\u2500\u2500 ${entry.author || "?"} \u2500\u2500\u2500 ${entry.created} \u2500\u2500\u2500`,
+        `\u2501\u2501\u2501 [${formatDisplayId(entry)}] \u2500\u2500\u2500 ${volume} \u2500\u2500\u2500 ${entry.author || "?"} \u2500\u2500\u2500 ${entry.created} \u2500\u2500\u2500`,
         "",
         formatContent(entry.content),
       ]
@@ -429,7 +434,10 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
 
       const allChangedIds = [args.id, ...autoRefChangedIds]
       const autoRefNote = autoRefChangedIds.length > 0
-        ? `\n[auto_refs: ${autoRefChangedIds.filter(id => id !== args.id).map(id => `↔${id}`).join(", ")}]`
+        ? `\n[auto_refs: ${autoRefChangedIds.filter(cid => cid !== updatedEntry.id).map(cid => {
+            const e = entries.find(e => e.id === cid)
+            return `↔${e ? toDisplayId(e.id, e.volume) : cid}`
+          }).join(", ")}]`
         : ""
       const commitHash = gitCommit(
         ctx.memDir, volume,
@@ -438,7 +446,7 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       )
 
       return [
-        `Revised [${args.id}] \u2192 ${volume}`,
+        `Revised [${formatDisplayId(updatedEntry)}] → ${volume}`,
         `Changes: ${changes.join(", ")}`,
         commitHash ? `Commit: ${commitHash}` : "(volume not version-controlled)",
         `Message: ${args.message}`,
@@ -504,7 +512,7 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       gitCommit(ctx.memDir, "archived", `archived: ${truncate(entry.content, 50)}\n\nEntry: ${args.id}\nFrom: ${volume}`, ctx.config, [args.id])
 
       return [
-        `Archived [${args.id}] ${volume} \u2192 archived`,
+        `Archived [${formatDisplayId(entry)}] ${volume} → archived`,
         `Author: ${entry.author || "unknown"}`,
         commitHash ? `Commit: ${commitHash}` : "(volume not version-controlled)",
       ].join("\n")
@@ -600,7 +608,7 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       gitCommit(ctx.memDir, metaVol, `meta: ${truncate(args.content, 50)}\n\nEntry: ${id}\nAuthor: ${agent}`, ctx.config)
 
       return [
-        `Calibrated [${id}] → ${metaVol}`,
+        `Calibrated [${toDisplayId(id, metaVol)}] → ${metaVol}`,
         `This calibration will take effect on next session startup.`,
         `Author: ${agent}`,
       ].join("\n")

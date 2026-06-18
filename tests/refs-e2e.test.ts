@@ -111,29 +111,29 @@ it("Scenario 1: full lifecycle — create, auto-link, unlink, revise, re-link", 
 
   applyAutoRefsPlan(plan1, entries, "l04")
 
-  expect(autoRefsFor(entries, "l04")).toContain("l01")
-  expect(autoRefsFor(entries, "l04")).toContain("l02")
-  expect(autoRefsFor(entries, "l01")).toContain("l04")
-  expect(autoRefsFor(entries, "l02")).toContain("l04")
-  expect(autoRefsFor(entries, "l04")).not.toContain("l03")
+  expect(autoRefsFor(entries, "l04")).toContain("layer:01")
+  expect(autoRefsFor(entries, "l04")).toContain("layer:02")
+  expect(autoRefsFor(entries, "l01")).toContain("layer:04")
+  expect(autoRefsFor(entries, "l02")).toContain("layer:04")
+  expect(autoRefsFor(entries, "l04")).not.toContain("layer:03")
 
   // ── Step 2: unlink l04↔l01 (auto) → both sides, refs_removed ──────
   const l04e = entries.find(e => e.id === "l04")!
   const l01e = entries.find(e => e.id === "l01")!
 
-  const refIdx = l04e.refs!.findIndex(r => r.target === "l01")
+  const refIdx = l04e.refs!.findIndex(r => r.target === "layer:01" || r.target === "l01")
   expect(refIdx).not.toBe(-1)
 
   l04e.refs!.splice(refIdx, 1)
-  l04e.refs_removed!.push("l01")
-  l01e.refs = l01e.refs!.filter(r => !(r.target === "l04" && r.source === "auto"))
+  l04e.refs_removed!.push("layer:01")
+  l01e.refs = l01e.refs!.filter(r => !(r.target === "layer:04" || r.target === "l04") && r.source === "auto")
   l04e.updated = "2026-06-03"
   l01e.updated = "2026-06-03"
 
-  expect(autoRefsFor(entries, "l04")).not.toContain("l01")
-  expect(autoRefsFor(entries, "l01")).not.toContain("l04")
-  expect(l04e.refs_removed).toContain("l01")
-  expect(autoRefsFor(entries, "l04")).toContain("l02") // l04↔l02 intact
+  expect(autoRefsFor(entries, "l04")).not.toContain("layer:01")
+  expect(autoRefsFor(entries, "l01")).not.toContain("layer:04")
+  expect(l04e.refs_removed).toContain("layer:01")
+  expect(autoRefsFor(entries, "l04")).toContain("layer:02") // l04↔l02 intact
 
   // ── Step 3: revise l04 → auto_refs respects refs_removed ───────────
   l04e.tags = ["type:design", "analysis:memory"]
@@ -147,12 +147,12 @@ it("Scenario 1: full lifecycle — create, auto-link, unlink, revise, re-link", 
   expect(l01Add).toBeUndefined() // CL-9: blocked by refs_removed
 
   // ── Step 4: memory_link l04→l01 → restores from refs_removed ──────
-  l04e.refs_removed = l04e.refs_removed!.filter(t => t !== "l01")
-  l04e.refs!.push({ target: "l01", reason: "re-linked manually", source: "manual" })
+  l04e.refs_removed = l04e.refs_removed!.filter(t => t !== "layer:01")
+  l04e.refs!.push({ target: "layer:01", reason: "re-linked manually", source: "manual" })
   l04e.updated = "2026-06-05"
 
-  expect(l04e.refs_removed).not.toContain("l01")
-  expect(manualRefsFor(entries, "l04")).toContain("l01")
+  expect(l04e.refs_removed).not.toContain("layer:01")
+  expect(manualRefsFor(entries, "l04")).toContain("layer:01")
 
   // ── Step 5: revise tags → manual link survives auto cleanup ────────
   l04e.tags = ["type:meta"] // No overlap with l01 or l02
@@ -162,15 +162,15 @@ it("Scenario 1: full lifecycle — create, auto-link, unlink, revise, re-link", 
 
   // l02 auto ref should be removed (no tag overlap)
   const l02Remove = plan5.remove.find(r =>
-    (r.entry1Id === "l04" && r.entry2Id === "l02") ||
+    (r.entry1Id === "l04" && (r.entry2Id === "l02" || r.entry2Id === "layer:02")) ||
     (r.entry1Id === "l02" && r.entry2Id === "l04")
   )
   expect(l02Remove).toBeDefined()
 
   // Manual ref to l01 should NOT be removed (CL-8)
   const l01Remove = plan5.remove.find(r =>
-    (r.entry1Id === "l04" && r.entry2Id === "l01") ||
-    (r.entry1Id === "l01" && r.entry2Id === "l04")
+    (r.entry1Id === "l04" && (r.entry2Id === "l01" || r.entry2Id === "layer:01")) ||
+    ((r.entry1Id === "l01" || r.entry1Id === "layer:01") && r.entry2Id === "l04")
   )
   expect(l01Remove).toBeUndefined()
 })
@@ -354,14 +354,14 @@ describe("E2E Scenario 7: Full lifecycle with refs", () => {
     const plan = computeAutoRefs(entries[0], entries, CONFIG_WITH_AUTO, false, EMPTY_KW_MAP)
     applyAutoRefsPlan(plan, entries, "l01")
 
-    expect(autoRefsFor(entries, "l01")).toContain("l02")
-    expect(autoRefsFor(entries, "l02")).toContain("l01")
+    expect(autoRefsFor(entries, "l01")).toContain("layer:02")
+    expect(autoRefsFor(entries, "l02")).toContain("layer:01")
 
     // Forget l01 (remove from entries)
     const remaining = entries.filter(e => e.id !== "l01")
 
     // l02 still has the ref to l01 (not auto-cleaned on forget — next revise would clean it)
-    expect(autoRefsFor(remaining, "l02")).toContain("l01")
+    expect(autoRefsFor(remaining, "l02")).toContain("layer:01")
 
     // Revise l02 to trigger auto_refs cleanup
     remaining[0].tags = ["type:meta"] // Change tag to break overlap

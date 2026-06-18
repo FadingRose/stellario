@@ -1,7 +1,7 @@
 import type { ToolContext, ToolDef, StellarioConfig, MemoryEntry, MemoryRef } from "../types.js"
 import { resolveContext } from "../context.js"
 import { resolveAgent, canRead, canWrite, isAuthor } from "../permissions.js"
-import { readJsonl, readVolumeIndex, extractTitle, findEntry, writeEntries, generateNextId, dedupeTags, ensureStringArray, ensureArray, today, getLinkedVolumes, getLinkedVolumeSymlinkPath } from "../store.js"
+import { readJsonl, readVolumeIndex, extractTitle, findEntry, writeEntries, generateNextId, dedupeTags, ensureStringArray, ensureArray, today, getLinkedVolumes, getLinkedVolumeSymlinkPath, formatDisplayId, toDisplayId } from "../store.js"
 import { loadConfig, getMemoryDir, getWorkspaceVolume } from "../config.js"
 import { queryTasks } from "../coord/store.js"
 import { getAllActiveLocks } from "../coord/lock.js"
@@ -101,13 +101,13 @@ export function buildStatus(projectRoot: string, agentName: string): string {
 
       // Render roadmaps with their child workspaces
       for (const roadmap of roadmaps) {
-        lines.push(`Roadmap: [${roadmap.id}] ${extractTitle(roadmap.content)}`)
+        lines.push(`Roadmap: [${formatDisplayId(roadmap)}] ${extractTitle(roadmap.content)}`)
         const childIds = new Set((roadmap.refs || []).map(r => r.target))
         const children = allEntries.filter(e => childIds.has(e.id))
         for (const child of children) {
           const refCount = (child.refs || []).length
           const refStr = refCount > 0 ? ` → ${(child.refs || []).map(r => r.target).join(", ")}` : ""
-          lines.push(`  [${child.id}] ${extractTitle(child.content)}${refStr}`)
+          lines.push(`  [${formatDisplayId(child)}] ${extractTitle(child.content)}${refStr}`)
         }
       }
 
@@ -119,7 +119,7 @@ export function buildStatus(projectRoot: string, agentName: string): string {
         for (const ws of standaloneWorkspaces) {
           const refCount = (ws.refs || []).length
           const refStr = refCount > 0 ? ` → ${(ws.refs || []).map(r => r.target).join(", ")}` : ""
-          lines.push(`  [${ws.id}] ${extractTitle(ws.content)}${refStr}`)
+          lines.push(`  [${formatDisplayId(ws)}] ${extractTitle(ws.content)}${refStr}`)
         }
       }
 
@@ -244,7 +244,7 @@ export function buildStatus(projectRoot: string, agentName: string): string {
       lines.push(`Prompt (${promptEntries.length} entries from ${metaVol}):`)
       lines.push("")
       for (const entry of promptEntries) {
-        lines.push(`[${entry.id}]`)
+        lines.push(`[${formatDisplayId(entry)}]`)
         lines.push(entry.content)
         lines.push("")
       }
@@ -321,7 +321,7 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
         if (!canRead(agent, found.volume, ctx.config)) {
           return `❌ Agent "${agent}" cannot read entry "${id}" (volume: ${found.volume}).`
         }
-        refs.push({ target: found.entry.id, reason: `gathered in theme`, source: "manual" })
+        refs.push({ target: toDisplayId(found.entry.id, found.entry.volume), reason: `gathered in theme`, source: "manual" })
       }
 
       const tags = dedupeTags(ensureStringArray(args.tags))
@@ -361,7 +361,7 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
       )
 
       const lines = [
-        `Assembled [${id}] → ${workspaceVol}`,
+        `Assembled [${toDisplayId(id, workspaceVol)}] → ${workspaceVol}`,
         `Author: ${agent}`,
         `Gathered: ${refs.length > 0 ? refs.map(r => r.target).join(", ") : "none"}`,
         commitHash ? `Commit: ${commitHash}` : "(volume not version-controlled)",
@@ -412,7 +412,7 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
 
       // Build output
       const lines: string[] = []
-      lines.push(`\u2501\u2501\u2501 [${entry.id}] ${workspaceVol} — ${extractTitle(entry.content)} \u2501\u2501\u2501`)
+      lines.push(`\u2501\u2501\u2501 [${formatDisplayId(entry)}] ${workspaceVol} — ${extractTitle(entry.content)} \u2501\u2501\u2501`)
       lines.push("")
       lines.push(entry.content)
 
@@ -425,7 +425,7 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
           const refFound = findEntry(ctx.memDir, ref.target, ctx.config)
           if (refFound) {
             lines.push("")
-            lines.push(`\u250C\u2500 [${refFound.entry.id}] ${refFound.volume} — ${extractTitle(refFound.entry.content)}`)
+            lines.push(`\u250C\u2500 [${formatDisplayId(refFound.entry)}] ${refFound.volume} — ${extractTitle(refFound.entry.content)}`)
             lines.push(`\u2502`)
             // Indent each line of the ref's content
             for (const line of refFound.entry.content.split("\n")) {
@@ -513,7 +513,7 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
 
       gitCommit(ctx.memDir, volume, `workspace edit: ${args.message}\n\nEntry: ${entry.id}\nLines: ${f}-${t}`, ctx.config)
 
-      return `Edited [${entry.id}] lines ${f}-${t}`
+      return `Edited [${formatDisplayId(entry)}] lines ${f}-${t}`
     },
   }
 
@@ -564,7 +564,7 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
           return `\u274c Agent "${agent}" cannot read entry "${id}".`
         }
         if (!existingTargets.has(refFound.entry.id)) {
-          newRefs.push({ target: refFound.entry.id, reason: `gathered in theme`, source: "manual" })
+          newRefs.push({ target: toDisplayId(refFound.entry.id, refFound.entry.volume), reason: `gathered in theme`, source: "manual" })
           existingTargets.add(refFound.entry.id)
         }
       }
@@ -582,7 +582,7 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
 
       gitCommit(ctx.memDir, volume, `workspace add: gathered ${newRefs.map(r => r.target).join(", ")}\n\nTheme: ${entry.id}`, ctx.config)
 
-      return `Gathered ${newRefs.length} entries into [${entry.id}]: ${newRefs.map(r => r.target).join(", ")}`
+      return `Gathered ${newRefs.length} entries into [${formatDisplayId(entry)}]: ${newRefs.map(r => r.target).join(", ")}`
     },
   }
 
@@ -643,7 +643,7 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
 
       gitCommit(ctx.memDir, volume, `workspace remove: removed ${removed} entries from ${entry.id}`, ctx.config)
 
-      return `Removed ${removed} entries from [${entry.id}]`
+      return `Removed ${removed} entries from [${formatDisplayId(entry)}]`
     },
   }
 

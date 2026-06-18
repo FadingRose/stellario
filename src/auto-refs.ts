@@ -9,6 +9,7 @@
 
 import type { StellarioConfig, MemoryEntry } from "./types.js"
 import { entryKeywordSimilarity, type KeywordIndexEntry } from "./embedding.js"
+import { toDisplayId } from "./store.js"
 
 // =============================================================================
 // Types
@@ -85,10 +86,17 @@ export function computeAutoRefs(
   }
 
   // 2. Find stale auto refs to remove (CL-8 + CL-10)
+  // Build lookup that matches both short id and display id
+  const entryById = new Map<string, MemoryEntry>()
+  for (const e of allEntries) {
+    entryById.set(e.id, e)
+    entryById.set(toDisplayId(e.id, e.volume), e)
+  }
+
   for (const ref of source.refs) {
     if (ref.source !== "auto") continue
 
-    const target = allEntries.find(e => e.id === ref.target)
+    const target = entryById.get(ref.target)
     if (!target) {
       plan.remove.push({ entry1Id: source.id, entry2Id: ref.target })
       continue
@@ -106,7 +114,12 @@ export function computeAutoRefs(
   }
 
   // 3. GC refs_removed
-  const volIds = new Set(allEntries.map(e => e.id))
+  // Build a set of all entry IDs (both short and display format) for lookup
+  const volIds = new Set<string>()
+  for (const e of allEntries) {
+    volIds.add(e.id)
+    volIds.add(toDisplayId(e.id, e.volume))
+  }
   for (const tid of source.refs_removed) {
     if (!volIds.has(tid)) {
       plan.gcRefsRemoved.push(tid)
@@ -127,26 +140,46 @@ export function applyAutoRefsPlan(
 ): string[] {
   const changed = new Set<string>([sourceId])
 
+  // Build lookup for add matching (both short and display id)
+  const addLookup = new Map<string, MemoryEntry>()
+  for (const e of entries) {
+    addLookup.set(e.id, e)
+    addLookup.set(toDisplayId(e.id, e.volume), e)
+  }
+
   for (const pair of plan.add) {
-    const e1 = entries.find(e => e.id === pair.entry1Id)
-    const e2 = entries.find(e => e.id === pair.entry2Id)
+    const e1 = addLookup.get(pair.entry1Id)
+    const e2 = addLookup.get(pair.entry2Id)
     if (!e1 || !e2) continue
     if (!e1.refs) e1.refs = []
     if (!e2.refs) e2.refs = []
-    e1.refs.push({ target: pair.entry2Id, reason: pair.reason, source: "auto" })
-    e2.refs.push({ target: pair.entry1Id, reason: pair.reason, source: "auto" })
+    // Store display ID in ref target (volume:number format)
+    e1.refs.push({ target: toDisplayId(e2.id, e2.volume), reason: pair.reason, source: "auto" })
+    e2.refs.push({ target: toDisplayId(e1.id, e1.volume), reason: pair.reason, source: "auto" })
     changed.add(pair.entry1Id)
     changed.add(pair.entry2Id)
   }
 
+  // Build lookup for removal matching (both short and display id)
+  const entryLookup = new Map<string, MemoryEntry>()
+  for (const e of entries) {
+    entryLookup.set(e.id, e)
+    entryLookup.set(toDisplayId(e.id, e.volume), e)
+  }
+
   for (const removal of plan.remove) {
-    const e1 = entries.find(e => e.id === removal.entry1Id)
-    const e2 = entries.find(e => e.id === removal.entry2Id)
+    const e1 = entryLookup.get(removal.entry1Id)
+    const e2 = entryLookup.get(removal.entry2Id)
+    // Match both old format (storage id) and new format (display id)
+    const targetsToRemove = new Set([removal.entry2Id])
+    if (e2) targetsToRemove.add(toDisplayId(e2.id, e2.volume))
     if (e1?.refs) e1.refs = e1.refs.filter(
-      r => !(r.target === removal.entry2Id && r.source === "auto")
+      r => !(targetsToRemove.has(r.target) && r.source === "auto")
     )
+    const targetsToRemove2 = new Set([removal.entry1Id])
+    if (e1) targetsToRemove2.add(toDisplayId(e1.id, e1.volume))
     if (e2?.refs) e2.refs = e2.refs.filter(
-      r => !(r.target === removal.entry1Id && r.source === "auto")
+      r => !(targetsToRemove2.has(r.target) && r.source === "auto")
     )
     changed.add(removal.entry1Id)
     if (e2) changed.add(removal.entry2Id)
@@ -171,13 +204,18 @@ export function hasTagOverlap(a: MemoryEntry, b: MemoryEntry): boolean {
 }
 
 export function isRefsRemovedBlocked(a: MemoryEntry, b: MemoryEntry): boolean {
-  const aBlocked = a.refs_removed?.includes(b.id)
-  const bBlocked = b.refs_removed?.includes(a.id)
+  // Match both old format (b.id) and new format (displayId)
+  const bIds = new Set([b.id, toDisplayId(b.id, b.volume)])
+  const aIds = new Set([a.id, toDisplayId(a.id, a.volume)])
+  const aBlocked = a.refs_removed?.some(t => bIds.has(t))
+  const bBlocked = b.refs_removed?.some(t => aIds.has(t))
   return !!(aBlocked || bBlocked)
 }
 
 export function hasAutoLink(a: MemoryEntry, b: MemoryEntry): boolean {
-  return !!a.refs?.some(r => r.target === b.id && r.source === "auto")
+  // Match both old format (b.id) and new format (displayId)
+  const bIds = new Set([b.id, toDisplayId(b.id, b.volume)])
+  return !!a.refs?.some(r => bIds.has(r.target) && r.source === "auto")
 }
 
 export function formatAutoReason(
