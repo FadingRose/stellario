@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.1] - 2026-06-18
+
+Major architecture cleanup. Breaking changes — existing configs may need updates.
+This is a pre-release; `npm install stellario` still gets 0.9.1. Use `npm install stellario@beta` to opt in.
+
+### Breaking Changes
+
+- **System volumes (reserved keywords).** `archived`, `meta`, `handover`, `layer` are now automatically injected into every config at load time. User definitions for these names are silently overridden. System volumes are agent-isolated (runtime author filter, not permission boundaries).
+- **Active workspace deprecated.** The `active` workspace pointer is removed. All workspace tools (`open`, `edit`, `add`, `remove`) now require an explicit `id`. Use the roadmap pattern instead: `type:roadmap` entries ref `type:workspace` entries; `buildStatus` renders the hierarchy on session start.
+- **Display ID format.** Entry IDs are displayed as `volume:number` (e.g. `active:01`) instead of short prefix format (`a01`). `findEntry` accepts both formats; new ref targets store display format, old ref targets work via prefix derivation (natural migration).
+
+### Added
+
+- **Auto-refs embedding fix.** `create`/`revise` now actually read the keyword index and probe embedding availability (was hardcoded `false` with empty map). Auto-refs produce semantic similarity links when embedding is available.
+- **Background index worker.** New `src/index-worker.ts` — keyword indexing is now a batched, fire-and-forget background job. Persistent `.index-pending.json` survives restarts. Search syncs pending before query for consistency. Plugin recovers interrupted work on session start.
+- **Display ID namespace.** `formatDisplayId`, `toDisplayId`, `parseDisplayId`, `isDisplayId` helpers in `store.ts`. All display points (show, search, buildStatus, workspace_open, create/revise/forget output) render `volume:number` format.
+- **Search empty-string sanitization.** `sanitizeOptionalString` in `telescope-defs.ts` handles opencode's `'""'` encoding of empty string args.
+
+### Changed
+
+- `getActiveWorkspace` / `setActiveWorkspace` removed from `store.ts`.
+- `workspace_assemble` no longer auto-sets active; returns next-step hint instead.
+- `idPrefix` deprecated (still functional for storage ID generation, ignored in display).
+- `resolveDefaultVolume` skips all system volumes.
+- `validateConfig` merges system volumes + validates idPrefix uniqueness + workspace uniqueness after merge.
+- Config warnings silenced (no stdout/stderr pollution in opencode UI).
+
+### Removed
+
+- `getActiveWorkspace`, `setActiveWorkspace` (store.ts)
+- Legacy `active_workspace` / `active_workspaces` volume index fields (stale data harmless — simply ignored)
+- `updateEntryIndex` calls in memory-defs (replaced by index-worker `markPending` + `triggerFlush`)
+
 ## [0.9.0] - 2026-06-10
 
 ### Added
