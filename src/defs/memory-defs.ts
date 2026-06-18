@@ -250,16 +250,64 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       if (!agent) return `\u274c Unknown agent: "${context.agent}"`
 
       const found = findEntry(ctx.memDir, args.id, ctx.config)
-      if (!found) return `\u274c Entry "${args.id}" not found.`
+      if (!found) return `❌ Entry "${args.id}" not found.`
 
       const { entry, volume } = found
 
       if (!canRead(agent, volume, ctx.config)) {
-        return `\u274c Agent "${agent}" cannot read volume "${volume}".`
+        return `❌ Agent "${agent}" cannot read volume "${volume}".`
+      }
+
+      // ── Auto-refs reconciliation (conditional) ──
+      // If the volume has autoRefs enabled, recompute auto-refs for this entry.
+      // This catches links that should exist but weren't created (e.g. a related
+      // entry was created after this one). Only writes if there are changes.
+      let autoRefNote = ""
+      const volDef = ctx.config.volumes[volume]
+      if (volDef?.autoRefs?.enabled) {
+        const entries = readJsonl(ctx.memDir, volume)
+        const entryIdx = entries.findIndex(e => e.id === entry.id)
+        if (entryIdx !== -1) {
+          const currentEntry = entries[entryIdx]
+          const { map: kwIndexMap, available: embAvail } = await buildKwIndexForAutoRefs(ctx.memDir, currentEntry)
+          const plan = computeAutoRefs(currentEntry, entries, ctx.config, embAvail, kwIndexMap)
+
+          if (plan.add.length > 0 || plan.remove.length > 0) {
+            const changedIds = applyAutoRefsPlan(plan, entries, currentEntry.id)
+            writeEntries(ctx.memDir, volume, entries, ctx.config)
+            for (const cid of changedIds) {
+              if (cid === currentEntry.id) continue
+              const changed = entries.find(e => e.id === cid)
+              if (changed) writeEntryMd(ctx.memDir, volume, changed)
+            }
+            writeEntryMd(ctx.memDir, volume, currentEntry)
+
+            const addedIds = plan.add
+              .filter(p => p.entry1Id === currentEntry.id || p.entry2Id === currentEntry.id)
+              .map(p => {
+                const otherId = p.entry1Id === currentEntry.id ? p.entry2Id : p.entry1Id
+                const other = entries.find(e => e.id === otherId)
+                return other ? toDisplayId(other.id, other.volume) : otherId
+              })
+
+            if (addedIds.length > 0) {
+              autoRefNote = `\n[auto_refs: discovered ${addedIds.map(id => `+${id}`).join(", ")}]`
+            }
+
+            gitCommit(
+              ctx.memDir, volume,
+              `show: auto-refs reconciled for ${currentEntry.id}\n\nChanges: +${plan.add.length} -${plan.remove.length}`,
+              ctx.config, changedIds,
+            )
+
+            // Use the updated entry for display
+            entry.refs = currentEntry.refs
+          }
+        }
       }
 
       const lines: string[] = [
-        `\u2501\u2501\u2501 [${formatDisplayId(entry)}] \u2500\u2500\u2500 ${volume} \u2500\u2500\u2500 ${entry.author || "?"} \u2500\u2500\u2500 ${entry.created} \u2500\u2500\u2500`,
+        `━━━ [${formatDisplayId(entry)}] ─── ${volume} ─── ${entry.author || "?"} ─── ${entry.created} ───`,
         "",
         formatContent(entry.content),
       ]
@@ -283,6 +331,10 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
 
       if (entry.refs_removed && entry.refs_removed.length > 0) {
         lines.push(`refs_removed: [${entry.refs_removed.join("], [")}]`)
+      }
+
+      if (autoRefNote) {
+        lines.push(autoRefNote)
       }
 
       return lines.join("\n")
