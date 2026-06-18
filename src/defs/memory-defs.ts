@@ -6,7 +6,7 @@ import {
   readJsonl, writeEntries, generateNextId, findEntry,
   today, truncate, extractTitle, dedupeTags, ensureStringArray, ensureArray,
   writeEntryMd, removeEntryMd, getEntryMdPath,
-  formatDisplayId, toDisplayId,
+  formatDisplayId, toDisplayId, parseDisplayId,
 } from "../store.js"
 import { gitCommit, gitLogEntry } from "../git.js"
 import {
@@ -343,8 +343,8 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       }
 
       const entries = readJsonl(ctx.memDir, volume)
-      const entryIndex = entries.findIndex((e) => e.id === args.id)
-      if (entryIndex === -1) return `\u274c Entry "${args.id}" not found in ${volume}.`
+      const entryIndex = entries.findIndex((e) => e.id === entry.id)
+      if (entryIndex === -1) return `❌ Entry "${entry.id}" not found in ${volume}.`
 
       const changes: string[] = []
 
@@ -482,9 +482,9 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       }
 
       const sourceEntries = readJsonl(ctx.memDir, volume)
-      const filtered = sourceEntries.filter((e) => e.id !== args.id)
+      const filtered = sourceEntries.filter((e) => e.id !== entry.id)
       if (filtered.length === sourceEntries.length) {
-        return `\u274c Entry "${args.id}" not found in ${volume}.`
+        return `❌ Entry "${entry.id}" not found in ${volume}.`
       }
       writeEntries(ctx.memDir, volume, filtered, ctx.config)
 
@@ -655,11 +655,12 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
 
       const volume = sourceFound.volume
       const entries = readJsonl(ctx.memDir, volume)
-      const source = entries.find(e => e.id === args.id)
-      if (!source) return `\u274c Source entry "${args.id}" not found in ${volume}.`
+      const source = entries.find(e => e.id === sourceFound.entry.id)
+      if (!source) return `❌ Source entry "${sourceFound.entry.id}" not found in ${volume}.`
 
-      // Already linked?
-      if (source.refs?.some(r => r.target === args.target)) {
+      // Already linked? (match both display and short format)
+      const targetStored = parseDisplayId(args.target, ctx.config)?.storedId ?? args.target
+      if (source.refs?.some(r => r.target === args.target || r.target === targetStored)) {
         return `\u274c [${args.id}] is already linked to [${args.target}].`
       }
 
@@ -720,10 +721,12 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
 
       const volume = sourceFound.volume
       const entries = readJsonl(ctx.memDir, volume)
-      const source = entries.find(e => e.id === args.id)
-      if (!source) return `\u274c Source entry "${args.id}" not found in ${volume}.`
+      const source = entries.find(e => e.id === sourceFound.entry.id)
+      if (!source) return `❌ Source entry "${sourceFound.entry.id}" not found in ${volume}.`
 
-      const refIdx = source.refs?.findIndex(r => r.target === args.target) ?? -1
+      // Match ref target in both display and short format
+      const targetStored = parseDisplayId(args.target, ctx.config)?.storedId ?? args.target
+      const refIdx = source.refs?.findIndex(r => r.target === args.target || r.target === targetStored) ?? -1
       if (refIdx === -1) {
         // Already unref'd — check refs_removed
         if (source.refs_removed?.includes(args.target)) {
@@ -742,10 +745,12 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         source.refs_removed.push(args.target)
 
         // Remove reverse auto ref from target (CL-10)
-        const target = entries.find(e => e.id === args.target)
+        // ref.target may be displayId or short format — find target entry
+        const targetEntryId = parseDisplayId(ref.target, ctx.config)?.storedId ?? ref.target
+        const target = entries.find(e => e.id === targetEntryId)
         if (target?.refs) {
           target.refs = target.refs.filter(
-            r => !(r.target === args.id && r.source === "auto")
+            r => !((r.target === args.id || r.target === sourceFound.entry.id) && r.source === "auto")
           )
           target.updated = today()
           changedIds.push(target.id)
