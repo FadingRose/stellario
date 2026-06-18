@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 
+	"stellario/engine/orchestrator"
+	"stellario/engine/reader"
 	"stellario/engine/store"
 	"stellario/engine/types"
 )
@@ -35,6 +37,8 @@ func main() {
 		cmdState(args)
 	case "supersede":
 		cmdSupersede(args)
+	case "constellation":
+		cmdConstellation(args)
 	case "help", "--help", "-h":
 		printHelp()
 	default:
@@ -266,6 +270,53 @@ func cmdSupersede(args []string) {
 	fmt.Printf("Marked %s as superseded by %s\n", oldID, newID)
 }
 
+func cmdConstellation(args []string) {
+	fs := flag.NewFlagSet("constellation", flag.ExitOnError)
+	stellarioDir := fs.String("dir", "", "stellario directory (e.g. .opencode/.stellario)")
+	bid := fs.String("bid", "", "bid — what you want to understand")
+	volume := fs.String("volume", "", "volume filter")
+	tagFilter := fs.String("tag", "", "tag filter")
+	hintsStr := fs.String("hints", "", "comma-separated hints (natural language)")
+	fs.Parse(args)
+
+	if *bid == "" || *stellarioDir == "" {
+		fmt.Fprintln(os.Stderr, "Usage: constellation --dir <stellario-dir> --bid <intent> [--volume <vol>] [--tag <tag>] [--hints <hints>]")
+		os.Exit(1)
+	}
+
+	// Read JSONL files
+	entries, edges, err := reader.ReadProject(*stellarioDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading project: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Fprintf(os.Stderr, "Loaded %d entries, %d edges\n", len(entries), len(edges))
+
+	// Build orchestrator
+	orch := orchestrator.New(entries, edges)
+
+	// Parse hints
+	var hints []string
+	if *hintsStr != "" {
+		hints = splitCSV(*hintsStr)
+	}
+
+	// Execute constellation
+	result, err := orch.Constellation(orchestrator.ConstellationRequest{
+		Bid:       *bid,
+		Hints:     hints,
+		Volume:    *volume,
+		TagFilter: *tagFilter,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println(result.DumpJSON())
+}
+
 // --- Helpers ---
 
 func splitCSV(s string) []string {
@@ -292,14 +343,15 @@ func printHelp() {
 	fmt.Println(`stellario — graph engine
 
 Commands:
-  create      Create a new entry
-  show        Show an entry with its edges
-  search      Search active entries
-  downstream  Find entries that derive from the given entry (transitive)
-  propagate   Find entries that become stale if the given entry is superseded
-  state       Show current active state for a volume/tag
-  supersede   Mark an entry as superseded by another
-  help        Show this help
+  create        Create a new entry
+  show          Show an entry with its edges
+  search        Search active entries
+  downstream    Find entries that derive from the given entry (transitive)
+  propagate     Find entries that become stale if the given entry is superseded
+  state         Show current active state for a volume/tag
+  supersede     Mark an entry as superseded by another
+  constellation Build an arc stream from a bid + hints
+  help          Show this help
 
 Environment:
   STELLARIO_DB  Path to SQLite database (default: stellario.db)`)
