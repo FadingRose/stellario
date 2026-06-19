@@ -1,12 +1,31 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { join } from "path"
 
-export default (async ({ directory }) => {
+export default (async ({ directory, client }) => {
   return {
-    "experimental.chat.system.transform": async (_input, output) => {
+    "experimental.chat.system.transform": async (input, output) => {
       try {
+        // Resolve the current agent name from session messages
+        let agent = "stellario"
+        if (input.sessionID) {
+          try {
+            const res = await client.session.messages({ path: { id: input.sessionID } })
+            if (res.data) {
+              for (let i = res.data.length - 1; i >= 0; i--) {
+                const msg = res.data[i].info
+                if (msg.role === "user" && msg.agent) {
+                  agent = msg.agent
+                  break
+                }
+              }
+            }
+          } catch {
+            // session lookup failed — fall back to default
+          }
+        }
+
         const { buildStatus } = await import("stellario/defs/workspace")
-        const status = buildStatus(directory, "stellario")
+        const status = buildStatus(directory, agent)
         output.system.push(status)
 
         // Trigger LSP initialization (fire-and-forget, non-blocking)
