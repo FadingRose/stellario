@@ -46,6 +46,7 @@ export function readTasks(memDir: string): Task[] {
         if (!Array.isArray(task.paths)) task.paths = []
         if (!Array.isArray(task.depends_on)) task.depends_on = []
         if (!Array.isArray(task.tags)) task.tags = []
+        if (!Array.isArray(task.blocked_by)) task.blocked_by = []
         return task
       })
   } catch {
@@ -91,6 +92,15 @@ export function queryTasks(memDir: string, filter?: TaskFilter): Task[] {
     tasks = tasks.filter(t =>
       filter.tags!.every(tag => t.tags.includes(tag))
     )
+  }
+
+  if (filter.parent !== undefined) {
+    if (filter.parent === "") {
+      // Empty string means "root-level" (no parent)
+      tasks = tasks.filter(t => !t.parent)
+    } else {
+      tasks = tasks.filter(t => t.parent === filter.parent)
+    }
   }
 
   return tasks
@@ -162,6 +172,9 @@ export function createTask(
     paths?: string[]
     depends_on?: string[]
     tags?: string[]
+    parent?: string
+    blocked_by?: string[]
+    gap?: string
   },
 ): Task {
   const tasks = readTasks(memDir)
@@ -173,6 +186,24 @@ export function createTask(
       const found = tasks.find(t => t.id === depId)
       if (!found) {
         throw new Error(`Dependency task "${depId}" not found`)
+      }
+    }
+  }
+
+  // Validate parent reference
+  if (opts.parent) {
+    const found = tasks.find(t => t.id === opts.parent)
+    if (!found) {
+      throw new Error(`Parent task "${opts.parent}" not found`)
+    }
+  }
+
+  // Validate blocked_by references
+  if (opts.blocked_by) {
+    for (const blockerId of opts.blocked_by) {
+      const found = tasks.find(t => t.id === blockerId)
+      if (!found) {
+        throw new Error(`Blocking task "${blockerId}" not found`)
       }
     }
   }
@@ -189,6 +220,9 @@ export function createTask(
     tags: opts.tags || [],
     created: today(),
     updated: today(),
+    parent: opts.parent,
+    blocked_by: opts.blocked_by || [],
+    gap: opts.gap,
   }
 
   tasks.push(task)
@@ -281,7 +315,7 @@ export function claimTask(memDir: string, id: string, agent: string): Task {
 }
 
 /**
- * Update a task's metadata (body, paths, tags).
+ * Update a task's metadata (body, paths, tags, parent, blocked_by, gap).
  * Only the author or owner can update.
  */
 export function updateTaskMeta(
@@ -294,6 +328,9 @@ export function updateTaskMeta(
     paths?: string[]
     tags?: string[]
     depends_on?: string[]
+    parent?: string
+    blocked_by?: string[]
+    gap?: string
   },
 ): Task {
   const tasks = readTasks(memDir)
@@ -307,6 +344,24 @@ export function updateTaskMeta(
     )
   }
 
+  // Validate parent reference if changing
+  if (updates.parent !== undefined && updates.parent !== "") {
+    const found = tasks.find(t => t.id === updates.parent)
+    if (!found) {
+      throw new Error(`Parent task "${updates.parent}" not found`)
+    }
+  }
+
+  // Validate blocked_by references if changing
+  if (updates.blocked_by) {
+    for (const blockerId of updates.blocked_by) {
+      const found = tasks.find(t => t.id === blockerId)
+      if (!found) {
+        throw new Error(`Blocking task "${blockerId}" not found`)
+      }
+    }
+  }
+
   tasks[index] = {
     ...task,
     title: updates.title ?? task.title,
@@ -314,9 +369,94 @@ export function updateTaskMeta(
     paths: updates.paths ?? task.paths,
     tags: updates.tags ?? task.tags,
     depends_on: updates.depends_on ?? task.depends_on,
+    parent: updates.parent ?? task.parent,
+    blocked_by: updates.blocked_by ?? task.blocked_by,
+    gap: updates.gap ?? task.gap,
     updated: today(),
   }
 
   writeTasks(memDir, tasks, agent)
   return tasks[index]
+}
+
+// =============================================================================
+// Tree Building (PlanItem hierarchy)
+// =============================================================================
+
+/**
+ * A node in the plan tree, with children and derived status.
+ * The derived status is computed from children, used for display.
+ */
+export interface PlanTreeNode {
+  item: Task
+  children: PlanTreeNode[]
+  derived_status: TaskStatus  // computed from children (or item.status if leaf)
+}
+
+/**
+ * Derive parent status from children's status.
+ * Rules (a04):
+ *   - all children done/cancelled → done
+ *   - at least one in_progress/review → in_progress
+ *   - at least one pending → pending (blocked)
+ *   - all open/claimed → open
+ */
+export function deriveParentStatus(children: PlanTreeNode[]): TaskStatus {
+  if (children.length === 0) {
+    return "open"
+  }
+
+  const statuses = children.map(c => c.derived_status)
+
+  // Any pending → pending (blocked propagation)
+  if (statuses.some(s => s === "pending")) return "pending"
+
+  // All terminal → done
+  if (statuses.every(s => s === "done" || s === "cancelled")) return "done"
+
+  // At least one active work → in_progress
+  if (statuses.some(s => s === "in_progress" || s === "review")) return "in_progress"
+
+  // All open/claimed → open
+  return "open"
+}
+
+/**
+ * Build the plan tree from flat tasks.
+ * Tasks with no parent are root-level.
+ * Tasks with parent field are nested under their parent.
+ * Parent status is derived from children (does not modify stored status).
+ */
+export function buildPlanTree(memDir: string): PlanTreeNode[] {
+  const tasks = readTasks(memDir)
+
+  // Build children map (parent → children)
+  const childrenMap = new Map<string, Task[]>()
+  const roots: Task[] = []
+
+  for (const t of tasks) {
+    if (t.parent) {
+      const parentChildren = childrenMap.get(t.parent) || []
+      parentChildren.push(t)
+      childrenMap.set(t.parent, parentChildren)
+    } else {
+      roots.push(t)
+    }
+  }
+
+  // Recursive build
+  function buildNode(item: Task): PlanTreeNode {
+    const childItems = childrenMap.get(item.id) || []
+    const children = childItems.map(buildNode)
+
+    // Leaf nodes: derived_status = stored status
+    // Parent nodes: derived_status = computed
+    const derived_status = children.length > 0
+      ? deriveParentStatus(children)
+      : item.status
+
+    return { item, children, derived_status }
+  }
+
+  return roots.map(buildNode)
 }

@@ -3,7 +3,8 @@ import { resolveContext } from "../context.js"
 import { resolveAgent, canRead, canWrite, isAuthor } from "../permissions.js"
 import { readJsonl, readVolumeIndex, extractTitle, findEntry, writeEntries, generateNextId, dedupeTags, ensureStringArray, ensureArray, today, getLinkedVolumes, getLinkedVolumeSymlinkPath, formatDisplayId, toDisplayId } from "../store.js"
 import { loadConfig, getMemoryDir, getWorkspaceVolume } from "../config.js"
-import { queryTasks } from "../coord/store.js"
+import { queryTasks, buildPlanTree } from "../coord/store.js"
+import type { PlanTreeNode } from "../coord/store.js"
 import { getAllActiveLocks } from "../coord/lock.js"
 import { getLspStatus } from "../lsp/manager.js"
 import { gitCommit } from "../git.js"
@@ -152,31 +153,47 @@ export function buildStatus(projectRoot: string, agentName: string): string {
     }
   }
 
-  // ── Taskboard ──
-  const activeTasks = queryTasks(memDir, {
-    status: ["open", "claimed", "in_progress", "pending", "review"],
-  })
+  // ── Roadmap (Plan Tree) ──
+  const planTree = buildPlanTree(memDir)
   const activeLocks = getAllActiveLocks(memDir)
 
-  if (activeTasks.length > 0 || activeLocks.length > 0) {
-    lines.push("")
-    lines.push("\u2500\u2500\u2500")
-    lines.push("Taskboard:")
-
-    if (activeTasks.length > 0) {
-      const statusOrder = ["in_progress", "pending", "claimed", "open", "review"] as const
-      for (const status of statusOrder) {
-        const group = activeTasks.filter(t => t.status === status)
-        for (const task of group) {
-          const owner = task.owner || "\u2014"
-          const paths = (task.paths?.length ?? 0) > 0 ? `  ${task.paths.join(", ")}` : ""
-          const reasonStr = task.status_reason ? ` — ${task.status_reason}` : ""
-          lines.push(`  [${task.id}] ${status.padEnd(12)} ${owner.padEnd(14)} ${task.title}${reasonStr}`)
-          if (paths) lines.push(`    ${paths}`)
+  // Count total active items (non-done, non-cancelled) across the tree
+  let totalActive = 0
+  let totalChildren = 0
+  let totalDone = 0
+  function countTree(nodes: PlanTreeNode[]) {
+    for (const node of nodes) {
+      if (node.children.length > 0) {
+        countTree(node.children)
+      } else {
+        totalChildren++
+        if (node.item.status === "done" || node.item.status === "cancelled") {
+          totalDone++
+        } else {
+          totalActive++
         }
       }
     }
+  }
+  countTree(planTree)
 
+  if (planTree.length > 0 || activeLocks.length > 0) {
+    lines.push("")
+    lines.push("\u2500\u2500\u2500")
+
+    // Summary line
+    const rootCount = planTree.length
+    const activeRoots = planTree.filter(n =>
+      !["done", "cancelled"].includes(n.derived_status)
+    ).length
+    lines.push(`Roadmap (${rootCount} milestone${rootCount !== 1 ? "s" : ""}, ${activeRoots} active, ${totalDone}/${totalChildren} tasks done):`)
+
+    // Render tree
+    for (const node of planTree) {
+      renderPlanNode(node, lines, 2)
+    }
+
+    // Locks
     if (activeLocks.length > 0) {
       lines.push("")
       for (const lock of activeLocks) {
@@ -711,4 +728,49 @@ function formatLockAge(isoTimestamp: string): string {
   const hours = Math.floor(minutes / 60)
   const remMin = minutes % 60
   return remMin > 0 ? `${hours}h ${remMin}m ago` : `${hours}h ago`
+}
+
+/**
+ * Render a plan tree node and its children.
+ * Indent indicates hierarchy depth.
+ * Icons show status and special markers (gap, blocked_by).
+ */
+function renderPlanNode(node: PlanTreeNode, lines: string[], indent: number): void {
+  const { item, children, derived_status } = node
+
+  // Status icon (derived status for display)
+  const statusIcon: Record<string, string> = {
+    in_progress: "\u25b6",   // ▶
+    pending: "\u23f8",       // ⏸
+    claimed: "\u2611",       // ☑
+    open: "\u25cb",          // ○
+    review: "\u23f3",        // ⏳
+    done: "\u2714",          // ✔
+    cancelled: "\u2716",     // ✖
+  }
+
+  const icon = statusIcon[derived_status] || "\u2022"
+  const ownerStr = item.owner ? ` (${item.owner})` : ""
+  const statusStr = children.length > 0
+    ? derived_status  // parent: show derived status
+    : item.status     // leaf: show stored status
+
+  // Base line
+  const indentStr = " ".repeat(indent)
+  let line = `${indentStr}${icon} [${item.id}] ${item.title}${ownerStr}`
+  
+  // Special markers
+  if (item.gap) {
+    line += ` \u26a0 Missing: ${item.gap}`  // ⚠
+  }
+  if (item.blocked_by && item.blocked_by.length > 0) {
+    line += ` \u23f8 blocked: ${item.blocked_by.join(", ")}`  // ⏸
+  }
+
+  lines.push(line)
+
+  // Render children
+  for (const child of children) {
+    renderPlanNode(child, lines, indent + 2)
+  }
 }

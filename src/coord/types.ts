@@ -51,11 +51,16 @@ export interface Task {
   author: string          // agent who created the task
   owner?: string          // agent who claimed it
   paths: string[]         // project-relative file paths this task involves
-  depends_on: string[]    // task IDs this task depends on
+  depends_on: string[]    // task IDs this task depends on (hard dependency — blocks in_progress)
   tags: string[]
   created: string         // YYYY-MM-DD
   updated: string         // YYYY-MM-DD
   completed?: string      // YYYY-MM-DD when status became done/cancelled
+
+  // ── Tree fields (PlanItem) ──
+  parent?: string         // parent item ID — builds milestone > epic > task hierarchy
+  blocked_by?: string[]   // item IDs blocking this one (collaboration signal, does not block status transitions)
+  gap?: string            // declares a missing piece ("needs X but nobody started") — any agent can claim
 }
 
 // ─── File Lock ───────────────────────────────────────────────────────────────
@@ -94,6 +99,7 @@ export interface TaskFilter {
   owner?: string
   author?: string
   tags?: string[]
+  parent?: string         // filter by parent ID (use "" for root-level items)
 }
 
 // ─── Tool Context Extension ──────────────────────────────────────────────────

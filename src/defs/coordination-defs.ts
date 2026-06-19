@@ -36,17 +36,20 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
 
   const taskboard_plan: ToolDef = {
     description:
-      "Create a coordination task. Declare intent to modify files, " +
+      "Create a coordination task (PlanItem). Declare intent to modify files, " +
       "so other agents can see your plan and avoid conflicts. " +
-      "Optionally specify file paths to lock, dependencies on other tasks, and tags.",
+      "Supports tree hierarchy via 'parent', collaboration signals via 'blocked_by' and 'gap'.",
     args: {
       title: z.string().describe("Short task description."),
       body: z.string().optional().describe("Detailed description or context."),
       owner: z.string().optional().describe("Agent to assign (skips 'open', goes straight to 'claimed')."),
       paths: z.array(z.string()).optional().describe("Project-relative file paths this task will modify."),
       lock_paths: z.boolean().optional().describe("Also lock the paths immediately. Default: false."),
-      depends_on: z.array(z.string()).optional().describe("Task IDs this task depends on (must be done first)."),
+      depends_on: z.array(z.string()).optional().describe("Task IDs this task depends on (hard dependency — blocks in_progress)."),
       tags: z.array(z.string()).optional().describe("Tags for categorization."),
+      parent: z.string().optional().describe("Parent item ID — builds milestone > epic > task hierarchy."),
+      blocked_by: z.array(z.string()).optional().describe("Item IDs blocking this one (collaboration signal — does not block transitions, just warns other agents)."),
+      gap: z.string().optional().describe("Declare a missing piece: 'needs X but nobody started'. Any agent can claim."),
     },
     async execute(args, context: ToolContext) {
       if (!args.title?.trim()) return "\u274c title is required."
@@ -59,6 +62,7 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
       const paths = ensureStringArray(args.paths)
       const depends_on = ensureStringArray(args.depends_on)
       const tags = ensureStringArray(args.tags)
+      const blocked_by = ensureStringArray(args.blocked_by)
 
       try {
         const task = createTask(ctx.memDir, {
@@ -69,6 +73,9 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
           paths,
           depends_on,
           tags,
+          parent: args.parent,
+          blocked_by,
+          gap: args.gap,
         })
 
         // Optionally lock paths
@@ -90,8 +97,11 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
           `Created [${task.id}] "${task.title}"`,
           `Status: ${task.status}${task.owner ? ` (owner: ${task.owner})` : ""}`,
           `Author: ${task.author}`,
+          task.parent ? `Parent: ${task.parent}` : null,
           (task.paths?.length ?? 0) > 0 ? `Paths: ${task.paths.join(", ")}` : null,
           (task.depends_on?.length ?? 0) > 0 ? `Depends: ${task.depends_on.join(", ")}` : null,
+          (task.blocked_by?.length ?? 0) > 0 ? `Blocked by: ${task.blocked_by.join(", ")}` : null,
+          task.gap ? `Gap: ${task.gap}` : null,
           (task.tags?.length ?? 0) > 0 ? `Tags: ${task.tags.join(", ")}` : null,
           lockResults || null,
         ].filter(Boolean).join("\n")
@@ -152,7 +162,7 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
   const taskboard_update: ToolDef = {
     description:
       "Update a task. Can change status (with transition validation), " +
-      "or update metadata (title, body, paths, tags). " +
+      "or update metadata (title, body, paths, tags, parent, blocked_by, gap). " +
       "Status transitions: open→claimed, claimed→in_progress, in_progress→pending/review/done, pending→in_progress, review→done. " +
       "Optional 'reason' to explain why the status changed (e.g. why blocked).",
     args: {
@@ -163,6 +173,9 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
       body: z.string().optional().describe("Updated description."),
       paths: z.array(z.string()).optional().describe("Updated file paths."),
       tags: z.array(z.string()).optional().describe("Updated tags."),
+      parent: z.string().optional().describe("Set parent item ID for tree hierarchy. Use '' to unset."),
+      blocked_by: z.array(z.string()).optional().describe("Items blocking this one (collaboration signal)."),
+      gap: z.string().optional().describe("Declare a missing piece. Use '' to clear."),
     },
     async execute(args, context: ToolContext) {
       if (!args.id) return "\u274c id is required."
@@ -174,6 +187,7 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
       // Defensive: opencode may pass arrays as JSON strings
       const paths = ensureStringArray(args.paths)
       const tags = ensureStringArray(args.tags)
+      const blocked_by = ensureStringArray(args.blocked_by)
 
       try {
         // Status update
@@ -184,18 +198,22 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
         }
 
         // Metadata update
-        const hasMeta = args.title || args.body || paths.length > 0 || tags.length > 0
+        const hasMeta = args.title || args.body || paths.length > 0 || tags.length > 0 ||
+          args.parent !== undefined || blocked_by.length > 0 || args.gap !== undefined
         if (hasMeta) {
           const task = updateTaskMeta(ctx.memDir, args.id, agent, {
             title: args.title,
             body: args.body,
             paths: paths.length > 0 ? paths : undefined,
             tags: tags.length > 0 ? tags : undefined,
+            parent: args.parent,
+            blocked_by: blocked_by.length > 0 ? blocked_by : undefined,
+            gap: args.gap,
           })
           return `Updated [${task.id}] metadata`
         }
 
-        return "\u274c Provide at least one of: status, title, body, paths, tags."
+        return "\u274c Provide at least one of: status, title, body, paths, tags, parent, blocked_by, gap."
       } catch (err: any) {
         return `\u274c ${err.message}`
       }
