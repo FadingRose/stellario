@@ -14,7 +14,7 @@ import {
 } from "../embedding.js"
 import { readLinkedVolume } from "./volume-link-defs.js"
 import { hasPending, flushIndexWorker } from "../index-worker.js"
-import { existsSync, readFileSync, readlinkSync } from "fs"
+import { existsSync, readFileSync, readlinkSync, appendFileSync } from "fs"
 import { join } from "path"
 
 // =============================================================================
@@ -115,6 +115,33 @@ function sanitizeOptionalString(val: unknown): string | undefined {
   return trimmed
 }
 
+/**
+ * Log a search intent to intent-log.jsonl for later profiling.
+ * Each entry records: intent, query, volumes, tags, result_count, timestamp.
+ */
+function logIntent(
+  memDir: string,
+  intent: string,
+  query: string | undefined,
+  volumes: string[],
+  tags: string[],
+  resultCount: number,
+) {
+  const entry = JSON.stringify({
+    intent,
+    query: query || "",
+    volumes,
+    tags,
+    result_count: resultCount,
+    created_at: new Date().toISOString(),
+  })
+  try {
+    appendFileSync(join(memDir, "intent-log.jsonl"), entry + "\n")
+  } catch {
+    // Non-critical — don't fail the search
+  }
+}
+
 export function getTelescopeToolDefs(): Record<string, ToolDef> {
   const search: ToolDef = {
     description:
@@ -138,6 +165,8 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
         .describe("What to return. 'entries' (default), 'tags' (enumerate tag values), 'keywords' (enumerate keywords)."),
       author: z.string().optional()
         .describe("Filter by entry author (exact match, case-insensitive)."),
+      intent: z.string().optional()
+        .describe("Agent's search intent in natural language. Used for data collection to understand search patterns. Optional."),
     },
     async execute(args, context: ToolContext) {
       // Defensive: opencode may pass array params as JSON strings
@@ -149,6 +178,7 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
       // Sanitize optional strings: opencode may encode "" as literal '""'
       const query = sanitizeOptionalString(args.query)
       const queryAuthor = sanitizeOptionalString(args.author)?.toLowerCase()
+      const intent = sanitizeOptionalString(args.intent)
 
       const ctx = resolveContext(context)
       const agent = resolveAgent(context.agent, ctx.config)
@@ -402,6 +432,11 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
 
       const limit = args.limit || 20
       results = results.slice(0, limit)
+
+      // Log search intent for profiling (only if intent was provided)
+      if (intent) {
+        logIntent(ctx.memDir, intent, query, queryVolumes, queryTags, results.length)
+      }
 
       if (results.length === 0) return "No matching entries found."
 

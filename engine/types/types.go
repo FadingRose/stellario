@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // FrameType defines the operational semantics of an entry on the memory graph.
 type FrameType string
@@ -28,6 +31,7 @@ const (
 // Entry is a unit of memory with frame semantics.
 type Entry struct {
 	ID        string    `json:"id"`
+	Project   string    `json:"project,omitempty"`
 	Volume    string    `json:"volume"`
 	Content   string    `json:"content"`
 	Tags      []string  `json:"tags"`
@@ -47,13 +51,32 @@ type Entry struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// EntryKey is a composite key that uniquely identifies an entry across projects.
+type EntryKey string
+
+// MakeEntryKey creates a composite key "project:id" for map indexing.
+func MakeEntryKey(project, id string) EntryKey {
+	return EntryKey(project + ":" + id)
+}
+
+// SplitEntryKey reverses MakeEntryKey.
+func SplitEntryKey(k EntryKey) (project, id string) {
+	idx := string(k)
+	if i := strings.Index(idx, ":"); i != -1 {
+		return idx[:i], idx[i+1:]
+	}
+	return "", idx
+}
+
 // Edge is a typed directed relationship between two entries.
 type Edge struct {
-	Source    string   `json:"source"`    // entry ID
-	Target    string   `json:"target"`    // entry ID (or dimension key for constrains)
-	Type      EdgeType `json:"type"`
-	Reason    string   `json:"reason"`
-	CreatedAt time.Time `json:"created_at"`
+	Source       string   `json:"source"`        // entry ID
+	SourceProject string  `json:"source_project,omitempty"` // project the source belongs to
+	Target       string   `json:"target"`        // entry ID (or dimension key for constrains)
+	TargetProject string  `json:"target_project,omitempty"` // project the target belongs to (nullable for external)
+	Type         EdgeType `json:"type"`
+	Reason       string   `json:"reason"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // EntryWithEdges is an entry plus its graph relationships.
@@ -61,4 +84,14 @@ type EntryWithEdges struct {
 	Entry
 	Outgoing []Edge `json:"outgoing,omitempty"`
 	Incoming []Edge `json:"incoming,omitempty"`
+}
+
+// StructuredHint represents a parsed hint operation (legacy, no longer translated by LLM).
+// Kept for backwards compatibility with ConstellationRequest.
+type StructuredHint struct {
+	Raw        string  `json:"raw"`
+	Op         string  `json:"op"`
+	Value      string  `json:"value,omitempty"`
+	Confidence float64 `json:"confidence,omitempty"`
+	Error      string  `json:"error,omitempty"`
 }
