@@ -58,6 +58,14 @@ export default (async ({ directory, client }) => {
           } catch {
             // index-worker not available — skip
           }
+
+          // Auto-pull: sync remote changes at session start (tolerates network failure)
+          try {
+            const { gitPull } = await import("stellario/git")
+            gitPull(memDir)
+          } catch {
+            // git not available or no remote — skip
+          }
         } catch {
           // LSP not configured or not available — skip
         }

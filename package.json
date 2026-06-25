@@ -30,7 +30,8 @@
     "./lsp/manager": "./src/lsp/manager.ts",
     "./index-worker": "./src/index-worker.ts",
     "./context": "./src/context.ts",
-    "./auto-refs": "./src/auto-refs.ts"
+    "./auto-refs": "./src/auto-refs.ts",
+    "./git": "./src/git.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.0.0",

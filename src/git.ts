@@ -8,6 +8,7 @@ import { readJsonl, formatEntryMdForTrack, ensureTrackVolumeDir } from "./store.
 
 /**
  * Git commit helper. Stages volume JSONL, volume MD, and any per-entry .track files.
+ * After commit, attempts to push (tolerates network failures silently).
  * Returns short commit hash on success, null on failure or skipped.
  */
 export function gitCommit(
@@ -31,7 +32,12 @@ export function gitCommit(
     // -A handles add/modify/delete for per-entry md files (forget removes them)
     execSync(`git add -A ${files.join(" ")}`, { cwd: memDir, stdio: "pipe" })
     execSync(`git commit -m ${JSON.stringify(message)}`, { cwd: memDir, stdio: "pipe" })
-    return execSync("git rev-parse --short HEAD", { cwd: memDir }).toString().trim()
+    const hash = execSync("git rev-parse --short HEAD", { cwd: memDir }).toString().trim()
+
+    // Fire-and-forget push — tolerates network partition
+    gitPush(memDir)
+
+    return hash
   } catch {
     return null
   }
@@ -150,5 +156,38 @@ export function gitLogEntry(
     return log || null
   } catch {
     return null
+  }
+}
+
+// =============================================================================
+// Auto Sync (push on commit, pull on session start)
+// =============================================================================
+//
+// Tolerates network partition — all failures are silent.
+// The global library (~/.stellario/) has a single git remote.
+// Push: fire-and-forget after every commit.
+// Pull: on session start, rebase local commits on top of remote.
+
+/**
+ * Push commits to remote. Silently fails on network error.
+ * Uses rebase to avoid merge commits.
+ */
+export function gitPush(memDir: string): void {
+  try {
+    execSync("git push origin HEAD 2>&1", { cwd: memDir, stdio: "pipe", timeout: 10000 })
+  } catch {
+    // Network partition, no remote, or auth failure — silent
+  }
+}
+
+/**
+ * Pull remote changes. Silently fails on network error.
+ * Uses rebase to keep linear history.
+ */
+export function gitPull(memDir: string): void {
+  try {
+    execSync("git pull --rebase origin HEAD 2>&1", { cwd: memDir, stdio: "pipe", timeout: 10000 })
+  } catch {
+    // Network partition, no remote, or conflict — silent
   }
 }
