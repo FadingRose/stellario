@@ -7,11 +7,31 @@ import (
 	"os"
 	"strings"
 
+	"stellario/engine/cmd"
+	"stellario/engine/cluster"
 	"stellario/engine/orchestrator"
 	"stellario/engine/reader"
 	"stellario/engine/store"
 	"stellario/engine/types"
 )
+
+// clusterResolveProject wraps cluster.ResolveProject for use in main.
+func clusterResolveProject(dir string) (string, string, string, error) {
+	return cluster.ResolveProject(dir)
+}
+
+// getArg extracts a flag value from a string slice.
+func getArg(args []string, flagName string) string {
+	for i, arg := range args {
+		if arg == flagName && i+1 < len(args) {
+			return args[i+1]
+		}
+		if strings.HasPrefix(arg, flagName+"=") {
+			return strings.TrimPrefix(arg, flagName+"=")
+		}
+	}
+	return ""
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -41,6 +61,20 @@ func main() {
 		cmdConstellation(args)
 	case "sync":
 		cmdSync(args)
+	case "doctor":
+		cmdDoctor(args)
+	case "status":
+		cmdStatus(args)
+	case "migrate":
+		cmdMigrate(args)
+	case "project":
+		cmdProject(args)
+	case "config":
+		cmdConfig(args)
+	case "memory-sync":
+		cmdMemorySync(args)
+	case "volume":
+		cmdVolume(args)
 	case "help", "--help", "-h":
 		printHelp()
 	default:
@@ -416,20 +450,221 @@ func cmdSync(args []string) {
 	printJSON(report)
 }
 
-func printHelp() {
-	fmt.Println(`stellario — graph engine
+func cmdDoctor(args []string) {
+	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
+	root := fs.String("root", ".", "project root directory")
+	fs.Parse(args)
 
-Commands:
+	os.Exit(cmd.RunDoctor(*root))
+}
+
+func cmdStatus(args []string) {
+	os.Exit(cmd.RunStatus())
+}
+
+func cmdConfig(args []string) {
+	if len(args) == 0 {
+		fmt.Println("Usage: stellario config <show|validate|edit> [--root <dir>]")
+		os.Exit(1)
+	}
+
+	subcmd := args[0]
+	rest := args[1:]
+
+	fs := flag.NewFlagSet("config", flag.ExitOnError)
+	root := fs.String("root", ".", "project root directory")
+	global := fs.Bool("global", false, "operate on global library config")
+	fs.Parse(rest)
+
+	switch subcmd {
+	case "show":
+		if *global {
+			os.Exit(cmd.RunConfigShowGlobal())
+		}
+		os.Exit(cmd.RunConfigShow(*root))
+	case "validate":
+		os.Exit(cmd.RunConfigValidate(*root))
+	case "edit":
+		os.Exit(cmd.RunConfigEdit(*root))
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown config subcommand: %s\n", subcmd)
+		os.Exit(1)
+	}
+}
+
+func cmdMemorySync(args []string) {
+	fs := flag.NewFlagSet("memory-sync", flag.ExitOnError)
+	project := fs.String("project", "", "specific project (default: all)")
+	push := fs.Bool("push", false, "push to remote")
+	pull := fs.Bool("pull", false, "pull from remote")
+	statusOnly := fs.Bool("status", false, "show sync status only (default)")
+	fs.Parse(args)
+
+	opts := cmd.SyncOptions{
+		ProjectName: *project,
+		Push:        *push,
+		Pull:        *pull,
+		StatusOnly:  *statusOnly,
+	}
+	os.Exit(cmd.RunSync(opts))
+}
+
+func cmdVolume(args []string) {
+	if len(args) == 0 {
+		fmt.Println("Usage: stellario volume <list|stats|grep> [args]")
+		fmt.Println()
+		fmt.Println("  list [--project <name>] [--global]   List volumes with entry counts")
+		fmt.Println("  stats <name> --project <name>         Detailed volume statistics")
+		fmt.Println("  grep <pattern> [--project <name>]     Search entry content")
+		os.Exit(1)
+	}
+
+	subcmd := args[0]
+	rest := args[1:]
+
+	switch subcmd {
+	case "list":
+		os.Exit(cmd.RunVolumeList(rest))
+	case "stats":
+		os.Exit(cmd.RunVolumeStats(rest))
+	case "grep":
+		os.Exit(cmd.RunVolumeGrep(rest))
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown volume subcommand: %s\n", subcmd)
+		os.Exit(1)
+	}
+}
+
+func cmdMigrate(args []string) {
+	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
+	root := fs.String("root", ".", "project root directory")
+	source := fs.String("source", "", "explicit source .stellario directory (default: auto-detect)")
+	project := fs.String("project", "", "explicit project name (default: auto-resolve from git)")
+	dryRun := fs.Bool("dry-run", false, "show what would be copied without copying")
+	verify := fs.Bool("verify", true, "verify migration after copy")
+	fs.Parse(args)
+
+	// For backward compat: migrate still works but delegates to the subtree model
+	opts := cmd.MigrateOptions{
+		SourceDir:   *source,
+		ProjectName: *project,
+		ProjectRoot: *root,
+		DryRun:      *dryRun,
+		Verify:      *verify,
+	}
+
+	result, err := cmd.RunMigrate(opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	_ = result
+}
+
+func cmdProject(args []string) {
+	if len(args) == 0 {
+		fmt.Println("Usage: stellario project <list|register|forget|info|add|remote> [args]")
+		fmt.Println()
+		fmt.Println("  list                    List all registered projects")
+		fmt.Println("  register <dir>          Register a local project directory")
+		fmt.Println("  add <git-url>           Add project from remote (subtree)")
+		fmt.Println("  add --local <dir>       Import local project data (subtree)")
+		fmt.Println("  forget <name>           Remove from device registry")
+		fmt.Println("  info <name>             Show project details")
+		fmt.Println("  remote <name> [url]     Set/show/remove subtree remote")
+		os.Exit(1)
+	}
+
+	subcmd := args[0]
+	rest := args[1:]
+
+	switch subcmd {
+	case "list":
+		os.Exit(cmd.RunProjectList())
+	case "register":
+		if len(rest) == 0 {
+			fmt.Println("Usage: stellario project register <directory>")
+			os.Exit(1)
+		}
+		os.Exit(cmd.RunProjectRegister(rest[0]))
+	case "forget":
+		if len(rest) == 0 {
+			fmt.Println("Usage: stellario project forget <name>")
+			os.Exit(1)
+		}
+		os.Exit(cmd.RunProjectForget(rest[0]))
+	case "info":
+		if len(rest) == 0 {
+			fmt.Println("Usage: stellario project info <name>")
+			os.Exit(1)
+		}
+		os.Exit(cmd.RunProjectInfo(rest[0]))
+	case "remote":
+		if len(rest) == 0 {
+			fmt.Println("Usage: stellario project remote <name> [url|--remove]")
+			os.Exit(1)
+		}
+		os.Exit(cmd.RunProjectRemote(rest[0], rest[1:]))
+	case "add":
+		if len(rest) == 0 {
+			fmt.Println("Usage: stellario project add <git-remote-url> [--name <name>]")
+			fmt.Println("       stellario project add --local <dir> [--name <name>]")
+			os.Exit(1)
+		}
+		// Check for --local flag
+		if rest[0] == "--local" {
+			if len(rest) < 2 {
+				fmt.Println("Usage: stellario project add --local <dir> [--name <name>]")
+				os.Exit(1)
+			}
+			localDir := rest[1]
+			// Resolve project name
+			nameFlag := getArg(rest[2:], "--name")
+			projectName := nameFlag
+			if projectName == "" {
+				name, _, _, err := clusterResolveProject(localDir)
+				if err != nil {
+					fmt.Printf("Error resolving project: %v\n", err)
+					os.Exit(1)
+				}
+				projectName = name
+			}
+			os.Exit(cmd.RunProjectAddLocal(localDir, projectName))
+		}
+		// Remote URL mode
+		remoteURL := rest[0]
+		os.Exit(cmd.RunProjectAdd(remoteURL))
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown project subcommand: %s\n", subcmd)
+		fmt.Println("Usage: stellario project <list|register|forget|info> [args]")
+		os.Exit(1)
+	}
+}
+
+func printHelp() {
+	fmt.Println(`stellario — graph engine + memory cluster manager
+
+Memory Operations:
   create           Create a new entry
   show             Show an entry with its edges
   search           Search active entries
+  supersede        Mark an entry as superseded by another
+
+Graph Operations:
   downstream       Find entries that derive from the given entry (transitive)
   propagate        Find entries that become stale if the given entry is superseded
   state            Show current active state for a volume/tag
-  supersede        Mark an entry as superseded by another
   constellation    Build an arc stream from a bid + hints
+
+Cluster Management:
+  status           Show cluster overview (all projects, volumes, sync state)
+  doctor           Diagnose config + memory integrity (read-only)
+  migrate          Copy memory data into the global library (~/.stellario/)
+  project          Manage project registration (list/register/forget/info/add/remote)
+  config           Show/validate/edit config (--global for global library)
+  volume           List/stats/grep volumes and entries
+  memory-sync      Git subtree push/pull per project
   sync             Sync JSONL files into SQLite (bulk import stale volumes)
-  help             Show this help
 
 Environment:
   STELLARIO_DB       Path to SQLite database (default: ~/.local/share/stellario/stellario.db)`)
