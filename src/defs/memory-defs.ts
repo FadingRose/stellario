@@ -182,7 +182,7 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       let keywords = ensureStringArray(args.keywords)
       keywords = [...new Set(keywords.map(k => k.trim()).filter(Boolean))]
 
-      const id = generateNextId(ctx.memDir, volumeName, ctx.config)
+      const id = generateNextId(ctx.memDir, volumeName, ctx.config, ctx.star)
 
       const entry: MemoryEntry = {
         id,
@@ -676,7 +676,7 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       }
 
       const tags = ["type:prompt"]
-      const id = generateNextId(ctx.memDir, metaVol, ctx.config)
+      const id = generateNextId(ctx.memDir, metaVol, ctx.config, ctx.star)
 
       const entry: MemoryEntry = {
         id,

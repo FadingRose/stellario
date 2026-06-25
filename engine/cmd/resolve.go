@@ -19,6 +19,7 @@ type ResolveResult struct {
 	MemDir     string `json:"mem_dir"`     // absolute path to memory data (~/.stellario/projects/{name})
 	ConfigPath string `json:"config_path"` // absolute path to stellario.yaml in global library
 	Exists     bool   `json:"exists"`      // whether the global library data exists (migrated)
+	Star       string `json:"star"`        // device star name for ID suffix (e.g. "Sirius")
 }
 
 // RunResolve resolves a project directory to its global library location.
@@ -40,12 +41,20 @@ func RunResolve(projectRoot string) int {
 		exists = false
 	}
 
+	// Get star name for ID suffix
+	starName := ""
+	dev, err := cluster.GetOrCreateDeviceID()
+	if err == nil {
+		starName = dev.Star
+	}
+
 	result := ResolveResult{
 		Project:    name,
 		Source:     source,
 		MemDir:     projectDir,
 		ConfigPath: configPath,
 		Exists:     exists,
+		Star:       starName,
 	}
 
 	data, err := json.MarshalIndent(result, "", "  ")

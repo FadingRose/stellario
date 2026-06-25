@@ -404,7 +404,7 @@ export function getWorkspaceToolDefs(): Record<string, ToolDef> {
       let keywords = ensureStringArray(args.keywords)
       keywords = [...new Set(keywords.map(k => k.trim()).filter(Boolean))]
 
-      const id = generateNextId(ctx.memDir, workspaceVol, ctx.config)
+      const id = generateNextId(ctx.memDir, workspaceVol, ctx.config, ctx.star)
       const entry: MemoryEntry = {
         id,
         volume: workspaceVol,

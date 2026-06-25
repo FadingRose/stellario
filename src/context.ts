@@ -18,6 +18,7 @@ export interface ResolvedContext {
   projectRoot: string
   memDir: string
   agent: string
+  star: string  // device star name for ID suffix (e.g. "Sirius"), empty if unavailable
 }
 
 /**
@@ -33,6 +34,7 @@ interface GoResolveResult {
   mem_dir: string
   config_path: string
   exists: boolean
+  star: string
 }
 
 /**
@@ -133,6 +135,7 @@ export function resolveContext(ctx: ToolContext): ResolvedContext {
       projectRoot: ctx.directory,
       memDir,
       agent: ctx.agent,
+      star: goResult.star || "",
     }
   }
 
@@ -151,6 +154,7 @@ export function resolveContext(ctx: ToolContext): ResolvedContext {
     projectRoot: ctx.directory,
     memDir,
     agent: ctx.agent,
+    star: "",
   }
 }
 

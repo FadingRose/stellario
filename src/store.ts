@@ -244,8 +244,9 @@ function primaryFileForVolume(memDir: string, volume: string): string {
  * Generate next ID for a volume.
  * - scratch profile: short hash (e.g., "d7f3a")
  * - all others: sequential prefix + nonce (e.g., "a42", "h03")
+ *   With star suffix for cross-device uniqueness (e.g., "a42.Sirius")
  */
-export function generateNextId(memDir: string, volume: string, config: StellarioConfig): string {
+export function generateNextId(memDir: string, volume: string, config: StellarioConfig, star?: string): string {
   const def = config.volumes[volume]
   if (!def) throw new Error(`Unknown volume: ${volume}`)
 
@@ -256,9 +257,11 @@ export function generateNextId(memDir: string, volume: string, config: Stellario
   }
 
   const prefix = getVolumeIdPrefix(config, volume)
+  const suffix = star ? `.${star}` : ""
+
   const nonce = bumpNonce(memDir, volume)
   if (nonce !== null) {
-    return `${prefix}${nonce}`
+    return `${prefix}${nonce}${suffix}`
   }
 
   // Legacy fallback: scan max ID
@@ -269,13 +272,15 @@ export function generateNextId(memDir: string, volume: string, config: Stellario
   ]
 
   for (const entry of allEntries) {
-    if (entry.id.startsWith(prefix)) {
-      const num = parseInt(entry.id.slice(prefix.length), 10)
+    // Strip star suffix if present for nonce comparison
+    const rawId = entry.id.split(".")[0]
+    if (rawId.startsWith(prefix)) {
+      const num = parseInt(rawId.slice(prefix.length), 10)
       if (!isNaN(num) && num > maxNum) maxNum = num
     }
   }
 
-  return `${prefix}${String(maxNum + 1).padStart(2, "0")}`
+  return `${prefix}${String(maxNum + 1).padStart(2, "0")}${suffix}`
 }
 
 function generateShortHashId(def: { idPrefix?: string }): string {
@@ -307,18 +312,42 @@ function bumpNonce(memDir: string, volume: string): number | null {
 // findEntry handles both transparently.
 
 /**
+ * Strip star suffix from a stored ID.
+ * "a06.Sirius" → "a06", "a06" → "a06", "d7f3a" → "d7f3a"
+ * Only strips if the suffix starts with an uppercase letter (star names are capitalized).
+ */
+function stripStarSuffix(id: string): string {
+  const dot = id.indexOf(".")
+  if (dot > 0 && dot < id.length - 1 && id[dot + 1] === id[dot + 1].toUpperCase()) {
+    return id.slice(0, dot)
+  }
+  return id
+}
+
+/**
+ * Check if two IDs match, ignoring star suffixes.
+ * Matches "a06" against "a06.Sirius" and vice versa.
+ */
+function idMatch(entryId: string, queryId: string): boolean {
+  if (entryId === queryId) return true
+  return stripStarSuffix(entryId) === stripStarSuffix(queryId)
+}
+
+/**
  * Convert a stored entry to its display ID: "volume:number".
  * Uses entry.volume field + id tail (strip first char = prefix).
+ * Star suffix is stripped: "a06.Sirius" → "active:06".
  */
 export function formatDisplayId(entry: MemoryEntry): string {
-  return `${entry.volume}:${entry.id.slice(1)}`
+  return `${entry.volume}:${stripStarSuffix(entry.id).slice(1)}`
 }
 
 /**
  * Convert a stored id + volume name to display ID.
+ * Star suffix is stripped: storedId "a06.Sirius" → "active:06".
  */
 export function toDisplayId(storedId: string, volume: string): string {
-  return `${volume}:${storedId.slice(1)}`
+  return `${volume}:${stripStarSuffix(storedId).slice(1)}`
 }
 
 /**
@@ -372,11 +401,11 @@ export function findEntry(
     if (!parsed) return null
     const { volume, storedId } = parsed
     const entries = readJsonl(memDir, volume)
-    const found = entries.find((e) => e.id === storedId)
+    const found = entries.find((e) => idMatch(e.id, storedId))
     if (found) return { entry: found, volume }
     // Also check archived (entry may have been forgotten)
     const archived = readJsonl(memDir, "archived")
-    const archivedFound = archived.find((e) => e.id === storedId)
+    const archivedFound = archived.find((e) => idMatch(e.id, storedId))
     if (archivedFound) return { entry: archivedFound, volume: "archived" }
     return null
   }
@@ -392,7 +421,7 @@ export function findEntry(
 
   for (const vol of searchOrder) {
     const entries = readJsonl(memDir, vol)
-    const found = entries.find((e) => e.id === id)
+    const found = entries.find((e) => idMatch(e.id, id))
     if (found) {
       return { entry: found, volume: vol }
     }
