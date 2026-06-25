@@ -8,7 +8,7 @@ import {
 import { randomUUID } from "crypto"
 import { join } from "path"
 import { z } from "zod"
-import type { StellarioConfig, MemoryEntry, VolumeIndexEntry } from "./types.js"
+import type { StellarioConfig, MemoryEntry, VolumeIndexEntry, MountRef } from "./types.js"
 import { profileBehavior } from "./types.js"
 import { getMemoryDir, getVolumeIdPrefix, getTrackedVolumes } from "./config.js"
 
@@ -178,10 +178,19 @@ function parseJsonlContent(content: string, volumeHint: string): MemoryEntry[] {
 
 /**
  * Read all entries for a volume.
- * Supports index-aware multi-file volumes and single-file fallback.
+ * Supports index-aware multi-file volumes, single-file fallback,
+ * and native mounts (reads from source_path in global library).
  */
 export function readJsonl(memDir: string, volume: string): MemoryEntry[] {
   const indexEntry = readVolumeIndex(memDir).find((e) => e.volume === volume)
+
+  // ── Native mount: read directly from source path ──
+  if (indexEntry?.mount) {
+    const sourcePath = indexEntry.mount.source_path
+    if (!existsSync(sourcePath)) return []
+    const content = readFileSync(sourcePath, "utf-8")
+    return parseJsonlContent(content, volume)
+  }
 
   if (indexEntry && indexEntry.files.length > 0) {
     const allEntries: MemoryEntry[] = []
@@ -212,6 +221,12 @@ export function writeEntries(
   config: StellarioConfig,
 ): void {
   if (!existsSync(memDir)) mkdirSync(memDir, { recursive: true })
+
+  // Defense-in-depth: refuse to write to mount volumes
+  const indexEntry = readVolumeIndex(memDir).find((e) => e.volume === volume)
+  if (indexEntry?.mount) {
+    throw new Error(`Cannot write to mount volume "${volume}" (source: ${indexEntry.mount.source_path})`)
+  }
 
   const primaryFile = primaryFileForVolume(memDir, volume)
   const jsonlPath = join(memDir, primaryFile)
@@ -525,102 +540,73 @@ export function getEntryMdPath(volume: string, id: string): string {
 }
 
 // =============================================================================
-// Linked Volumes (external volume binding)
+// Native Mounts (global library cross-project references)
 // =============================================================================
-
-import type { LinkedVolume } from "./types.js"
+//
+// Mounts are records in volumes.jsonl that point to another project's volume
+// in the global library. No symlinks — readJsonl reads source_path directly.
+// Mount entries are injected into config.volumes as frozen/readonly by
+// resolveContext, making them transparent to all downstream tools.
 
 /**
- * Get linked volumes for a specific agent.
+ * Read all mount references from the volume index.
  */
-export function getLinkedVolumes(
-  memDir: string,
-  agent: string,
-): LinkedVolume[] {
+export function readMounts(memDir: string): Array<{ alias: string; mount: MountRef }> {
   const index = readVolumeIndex(memDir)
+  const result: Array<{ alias: string; mount: MountRef }> = []
   for (const entry of index) {
-    if (entry.linked_volumes?.[agent]) {
-      return entry.linked_volumes[agent]
+    if (entry.mount) {
+      result.push({ alias: entry.volume, mount: entry.mount })
     }
   }
-  return []
+  return result
 }
 
 /**
- * Set linked volumes for a specific agent.
- * Stores on the first volume index entry (any entry works; it's per-agent).
+ * Add a native mount to the volume index.
+ * Returns false if the alias already exists.
  */
-export function setLinkedVolumes(
+export function addMount(
   memDir: string,
-  agent: string,
-  linked: LinkedVolume[],
-): void {
-  const index = readVolumeIndex(memDir)
-
-  // Find or create an entry to store linked_volumes on
-  let entry = index[0]
-  if (!entry) {
-    // No index entries yet — create a placeholder
-    entry = {
-      volume: "_meta",
-      files: [],
-      next_nonce: 0,
-    }
-    index.push(entry)
-  }
-
-  if (!entry.linked_volumes) entry.linked_volumes = {}
-  entry.linked_volumes[agent] = linked
-
-  writeVolumeIndex(memDir, index)
-}
-
-/**
- * Add a linked volume for an agent.
- * Returns false if alias already exists.
- */
-export function addLinkedVolume(
-  memDir: string,
-  agent: string,
-  link: LinkedVolume,
+  alias: string,
+  mount: MountRef,
 ): boolean {
-  const linked = getLinkedVolumes(memDir, agent)
-  if (linked.some(l => l.alias === link.alias)) return false
-  linked.push(link)
-  setLinkedVolumes(memDir, agent, linked)
+  const index = readVolumeIndex(memDir)
+  if (index.some(e => e.volume === alias)) return false
+
+  index.push({
+    volume: alias,
+    files: [],
+    next_nonce: 0,
+    mount,
+  })
+  writeVolumeIndex(memDir, index)
   return true
 }
 
 /**
- * Remove a linked volume by alias for an agent.
- * Returns the removed link, or null if not found.
+ * Remove a native mount from the volume index.
+ * Returns the removed mount, or null if not found.
+ * Refuses to remove non-mount entries (native volumes).
  */
-export function removeLinkedVolume(
+export function removeMount(
   memDir: string,
-  agent: string,
   alias: string,
-): LinkedVolume | null {
-  const linked = getLinkedVolumes(memDir, agent)
-  const idx = linked.findIndex(l => l.alias === alias)
+): MountRef | null {
+  const index = readVolumeIndex(memDir)
+  const idx = index.findIndex(e => e.volume === alias)
   if (idx === -1) return null
-  const removed = linked.splice(idx, 1)[0]
-  setLinkedVolumes(memDir, agent, linked)
-  return removed
+  if (!index[idx].mount) return null  // not a mount
+
+  const removed = index.splice(idx, 1)[0]
+  writeVolumeIndex(memDir, index)
+  return removed.mount!
 }
 
 /**
- * Get the symlink path for a linked volume's JSONL data file.
+ * Check if a volume name is a mount (vs native volume).
  */
-export function getLinkedVolumeSymlinkPath(
-  memDir: string,
-  alias: string,
-): string {
-  return join(memDir, "linked", `${alias}.jsonl`)
-}
-
-/**
- * Get the directory for linked volume symlinks.
- */
-export function getLinkedVolumesDir(memDir: string): string {
-  return join(memDir, "linked")
+export function isMountVolume(memDir: string, volume: string): boolean {
+  const index = readVolumeIndex(memDir)
+  return index.some(e => e.volume === volume && !!e.mount)
 }

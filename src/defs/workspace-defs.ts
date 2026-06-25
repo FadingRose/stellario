@@ -1,7 +1,7 @@
 import type { ToolContext, ToolDef, StellarioConfig, MemoryEntry, MemoryRef } from "../types.js"
 import { resolveContext, tryGoResolve } from "../context.js"
 import { resolveAgent, canRead, canWrite, isAuthor } from "../permissions.js"
-import { readJsonl, readVolumeIndex, extractTitle, findEntry, writeEntries, generateNextId, dedupeTags, ensureStringArray, ensureArray, today, getLinkedVolumes, getLinkedVolumeSymlinkPath, formatDisplayId, toDisplayId } from "../store.js"
+import { readJsonl, readVolumeIndex, extractTitle, findEntry, writeEntries, generateNextId, dedupeTags, ensureStringArray, ensureArray, today, readMounts, formatDisplayId, toDisplayId } from "../store.js"
 import { loadConfig, loadConfigFromPath, getMemoryDir, getWorkspaceVolume } from "../config.js"
 import { queryTasks, buildPlanTree } from "../coord/store.js"
 import type { PlanTreeNode } from "../coord/store.js"
@@ -9,7 +9,7 @@ import { getAllActiveLocks } from "../coord/lock.js"
 import { getLspStatus } from "../lsp/manager.js"
 import { gitCommit } from "../git.js"
 import { existsSync, readFileSync } from "fs"
-import { join, basename } from "path"
+import { join } from "path"
 import { z } from "zod"
 
 // =============================================================================
@@ -215,20 +215,25 @@ export function buildStatus(projectRoot: string, agentName: string): string {
     }
   }
 
-  // ── Linked external volumes ──
-  const linked = getLinkedVolumes(memDir, agentName)
-  if (linked.length > 0) {
+  // ── Native mounts ──
+  const mounts = readMounts(memDir)
+  if (mounts.length > 0) {
     lines.push("")
     lines.push("\u2500\u2500\u2500")
-    lines.push("Linked volumes:")
-    for (const lv of linked) {
+    lines.push("Mounts:")
+    for (const { alias, mount } of mounts) {
       let count = 0
+      let broken = false
       try {
-        const symlinkPath = getLinkedVolumeSymlinkPath(memDir, lv.alias)
-        const content = readFileSync(symlinkPath, "utf-8")
-        count = content.trim().split("\n").filter(l => l.trim()).length
-      } catch { /* broken symlink */ }
-      lines.push(`  ${lv.alias} ← ${lv.source_volume} @ ${basename(lv.source_project)} (${count} entries, readonly)`)
+        if (existsSync(mount.source_path)) {
+          const content = readFileSync(mount.source_path, "utf-8")
+          count = content.trim().split("\n").filter(l => l.trim()).length
+        } else {
+          broken = true
+        }
+      } catch { broken = true }
+      const status = broken ? "\u26a0\ufe0f BROKEN" : `${count} entries`
+      lines.push(`  ${alias} \u2190 ${mount.source_volume} @ ${mount.project} (${status}, readonly)`)
     }
   }
 

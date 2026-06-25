@@ -1,9 +1,10 @@
 import { existsSync, readFileSync } from "fs"
 import { join } from "path"
 import { execSync } from "child_process"
-import type { StellarioConfig, ToolContext } from "./types.js"
+import type { StellarioConfig, ToolContext, VolumeDef } from "./types.js"
 import { loadConfig, loadConfigFromPath, getMemoryDir } from "./config.js"
 import { initGitRepo, migrateTrackMd } from "./git.js"
+import { readMounts } from "./store.js"
 
 // =============================================================================
 // Context Resolution
@@ -19,6 +20,7 @@ export interface ResolvedContext {
   memDir: string
   agent: string
   star: string  // device star name for ID suffix (e.g. "Sirius"), empty if unavailable
+  projectName: string  // project identity in the global library (e.g. "stellario-dev"), empty if unresolved
 }
 
 /**
@@ -117,6 +119,25 @@ export function tryGoResolve(projectRoot: string): GoResolveResult | null {
  *   This is the legacy/project-scoped path, used when Go is unavailable
  *   or the project hasn't been migrated to the global library yet.
  */
+/**
+ * Inject native mounts into config.volumes as frozen/readonly.
+ * Called after config is loaded, before returning from resolveContext.
+ * Mount volumes become transparent to all downstream tools (search, status, etc.)
+ * because they appear in config.volumes and readJsonl redirects to source_path.
+ */
+function injectMounts(config: StellarioConfig, memDir: string): void {
+  const mounts = readMounts(memDir)
+  for (const { alias, mount } of mounts) {
+    if (!config.volumes[alias]) {
+      const frozenDef: VolumeDef = {
+        profile: "frozen",
+        boundaries: { read: ["all"], write: [] },
+      }
+      config.volumes[alias] = frozenDef
+    }
+  }
+}
+
 export function resolveContext(ctx: ToolContext): ResolvedContext {
   // ── Path A: Try Go resolve ──
   const goResult = tryGoResolve(ctx.directory)
@@ -126,9 +147,11 @@ export function resolveContext(ctx: ToolContext): ResolvedContext {
 
     if (!_trackInitialized) {
       initGitRepo(memDir)
-      // Skip migrateTrackMd in global library mode — .track already migrated
       _trackInitialized = true
     }
+
+    // Inject native mounts into config
+    injectMounts(config, memDir)
 
     return {
       config,
@@ -136,6 +159,7 @@ export function resolveContext(ctx: ToolContext): ResolvedContext {
       memDir,
       agent: ctx.agent,
       star: goResult.star || "",
+      projectName: goResult.project,
     }
   }
 
@@ -149,12 +173,16 @@ export function resolveContext(ctx: ToolContext): ResolvedContext {
     _trackInitialized = true
   }
 
+  // Inject native mounts (works in legacy mode too)
+  injectMounts(config, memDir)
+
   return {
     config,
     projectRoot: ctx.directory,
     memDir,
     agent: ctx.agent,
     star: "",
+    projectName: "",
   }
 }
 

@@ -147,22 +147,22 @@ export interface VolumeIndexEntry {
   next_nonce: number     // next available nonce for ID generation
   active_workspace?: string              // legacy: single global active entry (migrated to map on read)
   active_workspaces?: Record<string, string>  // per-agent: { agentName: entryId }
-  linked_volumes?: Record<string, LinkedVolume[]>  // per-agent: external volumes linked into context
+  mount?: MountRef       // present if this volume is a native mount (references another project's volume)
 }
 
 /**
- * An external volume linked into the agent's working context.
- * Points to another stellario project's volume via symlink.
+ * A native mount reference — points to another project's volume in the global library.
+ * No symlinks involved. readJsonl reads the source_path directly.
  */
-export interface LinkedVolume {
-  /** Local alias for the linked volume (must be unique within agent's context). */
-  alias: string
-  /** Absolute path to the external project root. */
-  source_project: string
-  /** Volume name in the external project's stellario.yaml. */
+export interface MountRef {
+  /** Source project name in the global library (e.g. "edelweiss"). */
+  project: string
+  /** Source volume name in that project (e.g. "active"). */
   source_volume: string
-  /** ISO 8601 timestamp when the link was created. */
-  linked_at: string
+  /** Absolute path to the source JSONL file. */
+  source_path: string
+  /** ISO 8601 timestamp when the mount was created. */
+  mounted_at: string
 }
 
 // ─── Tool Context ───────────────────────────────────────────────────────────
