@@ -49,19 +49,29 @@ An entry is **active** unless it has been superseded. The "current mental state"
 ```bash
 cd engine
 go build -o stellario ./cmd/stellario
+cp stellario ~/.local/bin/stellario  # install to PATH
 ```
 
 ## Usage
 
 ```bash
-# CRUD
-stellario create --volume audit --content "..." --tags type:issue --frame-type derive --derive-from a162
-stellario show a164
-stellario search --query "netting p01 p10" --volume audit
+# Resolve (TS runtime uses this as the bridge)
+stellario resolve --root /path/to/project
+# → { "project": "valhalla", "mem_dir": "~/.stellario/projects/valhalla",
+#     "star": "Sirius", "exists": true }
 
-# Graph operations
-stellario supersede a236 --target a234 --reason "timeline correction"
-stellario downstream a162           # what derives from a162?
-stellario propagate a234            # if a234 changes, what goes stale?
-stellario state --tag client:fluxpool  # current active state for FluxPool
+# Cluster management
+stellario status                    # all projects, volumes, sync state
+stellario doctor --root <dir>       # diagnostics
+stellario migrate --root <dir>      # copy memory into global library
+
+# Volume inspection
+stellario volume list               # all projects
+stellario volume list --project x   # single project
+stellario volume grep <pattern>     # search content
+
+# Sync (subtree-based, in addition to TS auto push/pull)
+stellario memory-sync --status
+stellario memory-sync --push [--project x]
+stellario memory-sync --pull [--project x]
 ```

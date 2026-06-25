@@ -194,7 +194,7 @@ An entry is the fundamental unit of memory. Each entry is a JSONL record:
 
 ```json
 {
-  "id": "a42",
+  "id": "a42.Sirius",
   "volume": "active",
   "content": "## Architecture\nWe chose a modular design...",
   "tags": ["type:design", "module:core"],
@@ -240,14 +240,25 @@ Directed links between entries:
 
 Refs form a knowledge graph. Each ref has a `target` (entry ID) and a `reason` (why the link exists). This enables traceability: "Why did we make this decision?" → follow refs back to context.
 
-### IDs (Star Names)
+### IDs (Star Suffixes)
 
-Entry IDs encode their volume origin:
+Entry IDs encode their volume origin and device identity:
 
-- **Sequential** (`a01`, `h03`, `l12`): stable, predictable, sortable. Used by tracked profiles.
+- **Sequential + star suffix** (`a01.Sirius`, `h03.Sirius`, `l12.Sirius`): stable, sortable, cross-device unique. Used by tracked profiles (mutable, append, frozen, workspace).
 - **Ephemeral** (`d7f3a`, `db2e1`): unique but not sequential. Used by scratch profile.
 
-The prefix character(s) come from the volume config (default: first character of volume name). This enables fast volume lookup from an ID — `h03` is probably in `handover`.
+The prefix character(s) come from the volume config (default: first character of volume name). The star suffix comes from the device's identity (assigned by the Go engine via `stellario resolve`).
+
+**Display IDs** strip the star suffix for readability:
+
+```
+stored ID:    a42.Sirius
+display ID:   active:42
+```
+
+The `stripStarSuffix()` and `idMatch()` helpers in `store.ts` handle this transparently — all tool-facing operations (show, revise, forget) accept display IDs without the suffix.
+
+When the Go engine is unavailable (no binary, project not migrated), IDs are generated without a suffix (`a42`). The system is backward-compatible — `idMatch` matches both suffixed and plain IDs.
 
 ## Storage
 

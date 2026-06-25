@@ -2,7 +2,7 @@
 
 Agent memory infrastructure — structured, permissioned, version-controlled, cross-project, cross-device.
 
-Agents get memory that survives across sessions. Volumes define how memory behaves (mutable, append-only, scratch, frozen, workspace). Permissions control which agent sees what. Semantic search finds concepts, not just keywords. A global library unifies memory across projects and devices via git.
+Agents get memory that survives across sessions. Volumes define how memory behaves (mutable, append-only, scratch, frozen, workspace). Permissions control which agent sees what. Semantic search finds concepts, not just keywords. A global library unifies memory across projects and devices via git. Auto-sync keeps everything up to date.
 
 ## Quick Start
 
@@ -20,8 +20,9 @@ Templates: `minimal` · `novel` · `software` · `audit`
 ### Global library + CLI (Go engine)
 
 ```bash
-# Install the Go CLI
-cd engine && go install ./cmd/stellario
+# Build and install the Go CLI
+cd engine && go build -o stellario ./cmd/stellario
+cp stellario ~/.local/bin/stellario
 
 # Migrate a project's memory into the global library
 stellario migrate --root /path/to/your-project
@@ -33,15 +34,18 @@ stellario status
 
 ### Cross-device sync
 
-```bash
-# Device A: push memory to remote
-stellario migrate --root ~/code/my-project
-cd ~/.stellario && git remote add origin <your-remote.git> && git push -u origin main
+The global library at `~/.stellario/` is a git repo. Set up a remote once:
 
-# Device B: pull everything
-git clone <your-remote.git> ~/.stellario
-stellario status   # all projects visible
+```bash
+cd ~/.stellario
+git remote add origin <your-remote.git>
+git push -u origin master
 ```
+
+After that, **sync is automatic**:
+- **Session start**: `git pull --rebase` pulls remote changes (other device's memory)
+- **Every commit**: `git push` pushes to remote immediately after writing
+- **Network down**: both operations fail silently — local commits queue up, sync resumes when connectivity returns
 
 ## Architecture
 
@@ -51,42 +55,44 @@ stellario.yaml          ← you define volumes, agents, permissions
         ▼
 ┌──────────────────────────────────┐
 │         Stellario Engine          │
-│  ┌──────────┐  ┌───────────────┐  │
-│  │ TS Core  │  │  Go Engine    │  │
-│  │ (legacy) │  │  (SQLite +    │  │
-│  │          │  │   graph +     │  │
-│  │ config,  │  │   CLI)        │  │
-│  │ tools,   │  │               │  │
-│  │ perms    │  │  status,      │  │
-│  └──────────┘  │  doctor,      │  │
-│                │  migrate,     │  │
-│                │  sync         │  │
-│                └───────────────┘  │
+│  ┌────────────┐  ┌─────────────┐  │
+│  │  TS Core   │  │  Go Engine  │  │
+│  │            │  │             │  │
+│  │ config     │  │ resolve     │  │
+│  │ tools      │  │ migrate     │  │
+│  │ perms      │  │ doctor      │  │
+│  │ search     │  │ volume      │  │
+│  │ mounts     │  │ sync        │  │
+│  │ git sync   │  │             │  │
+│  └────────────┘  └─────────────┘  │
 └──────────────────────────────────┘
         │                    │
         ▼                    ▼
   .opencode/.stellario/   ~/.stellario/
-  (project-scoped)        (global library)
-  JSONL + git             projects/ + global/
-                          subtree git repos
+  (legacy project-scoped) (global library)
+  JSONL + git             projects/{name}/
+                          single git repo
+                          auto push/pull
 ```
 
 ### Global Library Layout
 
 ```
 ~/.stellario/                    ← global library (one git repo)
-├── .git/                        ← parent repo (subtree model)
+├── .git/                        ← auto push/pull on every commit
 ├── .gitignore                   ← device-local files excluded from sync
 ├── .project-map.json            ← device-local: cwd → project name mapping
-├── .device-id                   ← device-local: identity
-├── global/                      ← cross-project volumes
-└── projects/
-    ├── valhalla/                ← subtree (independent push/pull)
-    │   ├── stellario.yaml       ← project config
-    │   ├── active.jsonl
-    │   └── ...
-    ├── stellario/
-    └── zanshin/
+├── .device-id                   ← device-local: identity + star name
+├── projects/
+│   ├── valhalla/                ← one directory per project
+│   │   ├── stellario.yaml       ← project config
+│   │   ├── active.jsonl         ← volume data
+│   │   ├── handover.jsonl
+│   │   ├── volumes.jsonl        ← volume index + mount records
+│   │   └── .track/              ← per-entry markdown for git diffs
+│   ├── edelweiss/
+│   └── stellario-dev/
+└── global/                      ← cross-project volumes
 ```
 
 ### Identity Model
@@ -95,12 +101,12 @@ stellario.yaml          ← you define volumes, agents, permissions
 agent (stellario)                ← cognitive identity (first class)
   └─ project (valhalla)          ← memory domain (first class)
        └─ session (stellario#a3f7) ← work instance
-            └─ device (macbook-m3) ← physical environment
+            └─ device (Sirius)    ← physical environment (star name)
 ```
 
 - **Memory layer**: identity = agent (role). Same agent's sessions share memory.
-- **Coordination layer**: identity = agent#nonce. Different sessions are different workers.
-- **Project is first class**: same project across devices shares memory. Project identity derived from git remote.
+- **Project is first class**: same project across devices shares memory. Project identity derived from git remote or `.project-map.json`.
+- **Star suffix**: entry IDs include the device's star name (e.g. `a42.Sirius`) for cross-device uniqueness. Display IDs strip the suffix: `active:42`.
 
 ## Tools (opencode)
 
@@ -115,12 +121,12 @@ agent (stellario)                ← cognitive identity (first class)
 | `ref` | memory | Create manual reference between entries |
 | `unref` | memory | Remove a reference between entries |
 | `search` | telescope | Unified search (text + tags + semantic) |
-| `status` | workspace | Dashboard: volume stats, active context, taskboard |
+| `status` | workspace | Dashboard: volume stats, active context, mounts |
 | `assemble` | workspace | Create a workspace theme gathering related entries |
 | `open` | workspace | Expand active workspace with all gathered entries |
-| `discover` | volume-link | Find stellario projects and their volumes |
-| `link` | volume-link | Bind an external project's volume (readonly symlink) |
-| `unlink` | volume-link | Unbind a linked volume |
+| `discover` | volume-link | Find stellario projects and their volumes in the global library |
+| `link` | volume-link | Mount an external project's volume (native, readonly) |
+| `unlink` | volume-link | Unmount a linked volume |
 
 ## CLI Commands (Go engine)
 
@@ -130,6 +136,7 @@ agent (stellario)                ← cognitive identity (first class)
 stellario status                          # cluster overview: all projects, volumes, sync state
 stellario doctor --root <dir>             # diagnose config + memory integrity (read-only)
 stellario migrate --root <dir>            # copy memory data into global library
+stellario resolve --root <dir>            # resolve project to global library path (JSON)
 stellario memory-sync --status            # check sync state
 stellario memory-sync --push [--project]  # push to remote (subtree)
 stellario memory-sync --pull [--project]  # pull from remote (subtree)
@@ -160,16 +167,20 @@ stellario volume stats <name> --project   # detailed statistics
 stellario volume grep <pattern>           # search entry content
 ```
 
-### Graph Engine
+## Native Volume Mount
 
-```bash
-stellario create --volume <vol> --content "..." [--tags "a,b"]
-stellario show <id> --volume <vol> --project <name>
-stellario search [--volume <vol>] [--tag <tag>]
-stellario supersede <new_id> <old_id>     # mark entry as superseded
-stellario downstream <id>                 # transitive derive_from
-stellario propagate <id>                  # what goes stale if superseded
-stellario constellation --bid "<intent>"  # intent-driven retrieval
+Cross-project memory reference — no symlinks, no filesystem artifacts. A mount is just a record in `volumes.jsonl` pointing to another project's volume in the global library.
+
+```
+# Mount edelweiss's active volume
+link(project="edelweiss", volume="active")
+  → creates mount record in volumes.jsonl
+  → resolveContext injects as frozen/readonly in config.volumes
+  → readJsonl reads source_path directly
+
+# All tools see it transparently
+search(query="rendering")
+  → includes edelweiss entries with volume="edelweiss/active"
 ```
 
 ## Profiles
@@ -178,13 +189,37 @@ Five profiles drive how entries behave:
 
 | Profile | Create | Revise | Forget | Git | ID Style |
 |---------|--------|--------|--------|-----|----------|
-| `mutable` | ✓ | ✓ | ✓ | ✓ | sequential |
-| `append` | ✓ | — | — | ✓ | sequential |
-| `scratch` | ✓ | ✓ | ✓ | — | ephemeral |
-| `frozen` | — | — | — | ✓ | sequential |
-| `workspace` | ✓ | ✓ | ✓ | ✓ | sequential + active tracking |
+| `mutable` | ✓ | ✓ | ✓ | ✓ | sequential + star suffix |
+| `append` | ✓ | — | — | ✓ | sequential + star suffix |
+| `scratch` | ✓ | ✓ | ✓ | — | ephemeral hash |
+| `frozen` | — | — | — | ✓ | sequential (inherited) |
+| `workspace` | ✓ | ✓ | ✓ | ✓ | sequential + star suffix |
 
 ## Troubleshooting
+
+### Tools not loading after stellario source changes
+
+Opencode loads stellario from `~/.opencode/node_modules/stellario`. If this is a stale npm-installed copy (not a symlink to source), source edits won't take effect:
+
+```bash
+# Fix: replace with symlink to source
+rm -rf ~/.opencode/node_modules/stellario
+ln -s /path/to/stellario ~/.opencode/node_modules/stellario
+```
+
+### Go resolve not working
+
+The Go binary must support `resolve --help`. If `which stellario` finds the Node CLI script instead:
+
+```bash
+# Verify
+stellario resolve --root /path/to/project
+
+# If it says "Unknown command: resolve", the Go binary isn't in PATH
+# Build and install it:
+cd engine && go build -o stellario ./cmd/stellario
+cp stellario ~/.local/bin/stellario
+```
 
 ### Clean rebuild (preserving memory)
 
@@ -200,12 +235,6 @@ rm -rf .opencode/node_modules
 npx stellario init --template <your-template>
 ```
 
-### Tools not showing up in opencode
-
-1. Check `.opencode/tools/` has the glue files: `ls .opencode/tools/stellario-*.ts`
-2. Check `.opencode/node_modules/stellario` exists
-3. If missing, run `cd .opencode && npm install`
-
 ### Config validation fails
 
 ```bash
@@ -214,41 +243,15 @@ stellario doctor --root /path/to/project
 ```
 
 Common issues:
-- Multiple volumes with `profile: workspace` (only one allowed — system volume `layer` already uses it)
+- Multiple volumes with `profile: workspace` (only one allowed)
 - Missing `boundaries` on user-defined volumes
 - `idPrefix` conflicts between volumes
 
-### Cross-device sync issues
-
-```bash
-# Check what would happen
-stellario memory-sync --status
-
-# Verify data integrity after clone
-stellario doctor --root /path/to/project
-stellario status
-```
-
-## Migration Path (opencode → Go engine)
-
-Stellario is migrating from a TS-only engine to a Go backend. Current status:
-
-| Phase | Status | What |
-|-------|--------|------|
-| Phase 1 | ✅ Done | Go `doctor` command (read-only diagnostics) |
-| Phase 2 | ✅ Done | Go `migrate` + global library layout |
-| Phase 3 | ✅ Done | Go CLI: status, config, volume, sync (subtree) |
-| Phase 4 | 🔄 Next | Go takes over write operations (create/revise/forget) |
-| Phase 5 | ⏳ Planned | TS engine retirement |
-| Phase 6 | ⏳ Planned | LSP + embedding migration to Go |
-
-The TS engine and Go engine coexist. TS handles agent tools (opencode plugin), Go handles cluster management and will gradually take over writes.
-
 ## Docs
 
-- [Core Concepts](docs/concepts.md) — profiles, authority, permissions, entries, refs
+- [Core Concepts](docs/concepts.md) — profiles, authority, permissions, entries, refs, star suffixes
 - [Configuration](docs/configuration.md) — full `stellario.yaml` reference
-- [Volume Link](docs/volume-link.md) — cross-project memory observation
+- [Volume Mount](docs/volume-link.md) — cross-project memory reference (native, symlink-free)
 - [Architecture & Module API](docs/architecture.md) — source layout and module exports
 - [API Reference](docs/api.md) — full API with types and examples
 

@@ -67,6 +67,17 @@ agents:
     # Required. Human-readable name shown in tool output.
     display: "Agent Name"
 
+    # Optional. Agent role.
+    # "primary" = user-facing agent (gets task, edit, bash tools)
+    # "subagent" = dispatched via task tool
+    # Default: "subagent"
+    role: primary
+
+# Optional. Semantic search / embedding configuration.
+embedding:
+  enabled: auto       # auto | true | false (default: auto)
+  model: "Xenova/all-MiniLM-L6-v2"
+
 # Optional. Tag vocabulary configuration.
 tags:
   # Allowed tag namespaces (e.g., ["work", "role", "type"]).
@@ -363,101 +374,6 @@ Stellario  |  W   |  W     |  W       |  W    |  W       |  R
 Analyst    |  -   |  -     |  -       |  W    |  -       |  R
 Executor   |  -   |  -     |  -       |  -    |  W       |  R
 Guardian   |  -   |  -     |  -       |  -    |  -       |  R
-```
-
-### novel.yaml
-
-5 agents, 8 volumes. Multi-agent fiction writing.
-
-```yaml
-memoryDir: ".writer-memory"
-volumes:
-  meta:      { profile: mutable,   authority: curated,     idPrefix: m }
-  active:    { profile: mutable,   authority: curated,     idPrefix: a }
-  handover:  { profile: append,    authority: curated,     idPrefix: h }
-  layer:     { profile: workspace, authority: curated,     idPrefix: l }
-  drafting:  { profile: scratch,   authority: curated,     idPrefix: d }
-  lore:      { profile: mutable,   authority: synthesized, idPrefix: s, requiredTagPrefix: "lore:" }
-  animus:    { profile: mutable,   authority: curated,     idPrefix: n }
-  archived:  { profile: frozen }
-agents:
-  stellario:    { display: "Stellario" }
-  chronicler:   { display: "Chronicler" }
-  worldbuilder: { display: "Worldbuilder" }
-  penna:        { display: "Penna" }
-  vilicus:      { display: "Vilicus" }
-tags:
-  namespaces: [work, role, chapter, file, arc, type]
-  typeValues: [handoff, design, locked, layer, convention, polish, role-card, foreshadow]
-```
-
-Permission matrix:
-
-```
-Agent        | meta | active | handover | layer | drafting | lore | animus
-────────────────────────────────────────────────────────────────────────────
-Stellario    |  W   |  W     |  W       |  W    |  W       |  -   |  -
-Chronicler   |  -   |  -     |  -       |  W    |  -       |  -   |  -
-Worldbuilder |  -   |  -     |  -       |  -    |  -       |  W   |  -
-Penna        |  -   |  -     |  -       |  -    |  W       |  -   |  -
-Vilicus      |  -   |  -     |  -       |  -    |  -       |  -   |  W
-```
-
-Permission matrix:
-
-```
-Agent       | meta | active | handover | layer | drafting | lore | animus
-────────────────────────────────────────────────────────────────────────────
-Maestro     |  W   |  W     |  W       |  W    |  W       |  -   |  -
-Chronicler  |  -   |  -     |  -       |  W    |  -       |  -   |  -
-Stellario   |  -   |  -     |  -       |  -    |  -       |  W   |  -
-Penna       |  -   |  -     |  -       |  -    |  W       |  -   |  -
-Vilicus     |  -   |  -     |  -       |  -    |  -       |  -   |  W
-```
-
-### software.yaml
-
-4 agents, 6 volumes. Software development.
-
-```yaml
-memoryDir: ".stellario"
-volumes:
-  meta:      { profile: mutable,   idPrefix: m }
-  active:    { profile: mutable,   idPrefix: a }
-  handover:  { profile: append,    idPrefix: h }
-  layer:     { profile: workspace, idPrefix: l }
-  drafting:  { profile: scratch,   idPrefix: d }
-  archived:  { profile: frozen }
-agents:
-  stellario: { display: "Stellario" }
-  analyst:   { display: "Analyst" }
-  executor:  { display: "Executor" }
-  guardian:  { display: "Guardian" }
-tags:
-  namespaces: [module, feature, crate, file, type]
-  typeValues: [handoff, design, adr, convention, layer, polish, bug, investigation]
-```
-
-Permission matrix:
-
-```
-Agent      | meta | active | handover | layer | drafting | archived
-───────────────────────────────────────────────────────────────────
-Stellario  |  W   |  W     |  W       |  W    |  W       |  R
-Analyst    |  -   |  -     |  -       |  W    |  -       |  R
-Executor   |  -   |  -     |  -       |  -    |  W       |  R
-Guardian   |  -   |  -     |  -       |  -    |  -       |  R
-```
-
-Permission matrix:
-
-```
-Agent     | meta | active | handover | layer | drafting | archived
-───────────────────────────────────────────────────────────────────
-Lead      |  W   |  W     |  W       |  W    |  W       |  R
-Analyst   |  -   |  -     |  -       |  W    |  -       |  R
-Executor  |  -   |  -     |  -       |  -    |  W       |  R
-Guardian  |  -   |  -     |  -       |  -    |  -       |  R
 ```
 
 ## Validation Rules

@@ -1,35 +1,84 @@
-# Volume Link
+# Volume Mount
 
-Cross-project memory observation between Stellario instances.
+Cross-project memory reference — native, symlink-free, readonly.
 
 ---
 
 ## Overview
 
-An agent can link volumes from other Stellario projects into its working context. The external volume is accessed readonly via symlink — the agent observes without modifying.
+In the global library model, all projects are siblings at `~/.stellario/projects/{name}/`. "Mounting" another project's volume is just a record in `volumes.jsonl` — no symlinks, no filesystem artifacts. The source data is read directly at runtime.
 
 ```bash
-# Discover what's available
-discover(path="/path/to/other/project")
+# Discover what's available in the global library
+discover()
+# → Mounts: (none)
+# → Local volumes: active (mutable, 6 entries), ...
+# → Available projects:
+#     edelweiss: active (87), handover (135), layer (171), ...
 
-# Link an external volume
-link(project="/path/to/other/project", volume="active", alias="other_active")
+# Mount edelweiss's active volume
+link(project="edelweiss", volume="active")
+# → Mounted "active" from edelweiss
+# → Alias: edelweiss/active
+# → Entries: 87, Access: readonly
 
-# Search includes linked volumes automatically
-search(query="authentication")
+# Search includes mounted volumes transparently
+search(query="rendering")
+# → [edelweiss/active:57] Edelweiss 3D Workspace — Formal Specification
+# → [edelweiss/active:65] Faceted Surface Spec
+# → [active:03] ...
+
+# Unmount
+unlink(alias="edelweiss/active")
 ```
 
 ## How It Works
 
-1. **discover** scans a path for `.opencode/stellario.yaml` and reports available volumes and agents
-2. **link** creates a symlink from your memory directory to the external project's volume data (readonly)
-3. All tools (create, show, search, etc.) transparently include linked volumes — no extra flags needed
-4. **unlink** removes the symlink
+1. **discover** lists projects in the global library (`~/.stellario/projects/`) and their volumes by reading each project's `stellario.yaml`
+2. **link** adds a mount record to `volumes.jsonl` — just a JSON line with the source path
+3. `resolveContext` injects mount volumes into `config.volumes` as `frozen` profile with `read: ["all"]`
+4. `readJsonl` checks for a mount record and reads the source JSONL directly
+5. All tools (search, status, etc.) see mount volumes transparently — zero ad-hoc code
+6. **unlink** removes the mount record from `volumes.jsonl`
 
-Linked volumes respect the *source project's* permission model — your agent's boundaries are checked against the remote config.
+### Data Model
+
+Mount records live in `volumes.jsonl` as entries with a `mount` field:
+
+```jsonl
+{"volume":"edelweiss/active","files":[],"next_nonce":0,
+ "mount":{"project":"edelweiss","source_volume":"active",
+          "source_path":"/home/user/.stellario/projects/edelweiss/active.jsonl",
+          "mounted_at":"2026-06-26T22:26:27.455Z"}}
+```
+
+### Alias Naming
+
+- Default alias: `{project}/{volume}` (e.g. `edelweiss/active`)
+- Aliases **must not contain `:`** (used as display ID separator)
+- Custom aliases can be set via the `alias` parameter
+
+### Display IDs
+
+Mount volume entries use the alias as the volume name in display IDs:
+
+```
+stored ID:    a57.Sirius
+display ID:   edelweiss/active:57
+```
+
+The `stripStarSuffix` and `idMatch` helpers in `store.ts` handle the suffix transparently.
+
+## Constraints
+
+- Mounts are **project-level** (not per-agent) — all agents in the project see the same mounts
+- Mount volumes are **always readonly** (frozen profile injected by `resolveContext`)
+- `writeEntries` has a defense-in-depth check that throws if called on a mount volume
+- `generateNextId` only scans local volumes — no ID collision with mount entries
 
 ## Use Cases
 
-- A security audit project linking the client project's `active` volume for context
-- A research project linking a knowledge base project's `meta` volume
-- Multiple related projects sharing a `layer` workspace volume
+- Reference another project's design decisions while working on a related project
+- Share a knowledge base across projects without duplication
+- Audit a client project's memory without modifying it
+- Cross-project search for related work

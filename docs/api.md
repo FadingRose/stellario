@@ -64,6 +64,7 @@ interface VolumeDef {
 ```typescript
 interface AgentDef {
   display: string
+  role?: "primary" | "subagent"
 }
 ```
 
@@ -75,8 +76,32 @@ interface StellarioConfig {
   volumes: Record<string, VolumeDef>
   agents: Record<string, AgentDef>
   tags?: TagConfig
+  embedding?: EmbeddingConfig
+  lsp?: Record<string, any>
 }
 ```
+
+#### `EmbeddingConfig`
+
+```typescript
+interface EmbeddingConfig {
+  enabled?: boolean | "auto"
+  model?: string    // default: "Xenova/all-MiniLM-L6-v2"
+}
+```
+
+#### `MountRef`
+
+```typescript
+interface MountRef {
+  project: string        // source project name in global library
+  source_volume: string  // source volume name
+  source_path: string    // absolute path to source JSONL
+  mounted_at: string     // ISO timestamp
+}
+```
+
+Native mount reference — stored in `volumes.jsonl`, injected into `config.volumes` as frozen/readonly by `resolveContext`. No symlinks involved.
 
 #### `MemoryEntry`
 
@@ -102,6 +127,7 @@ interface MemoryEntry {
 interface MemoryRef {
   target: string   // referenced entry ID
   reason: string   // why this entry references the target
+  source: "manual" | "auto"
 }
 ```
 
@@ -113,6 +139,8 @@ interface VolumeIndexEntry {
   files: string[]
   next_nonce: number
   active_workspace?: string
+  active_workspaces?: Record<string, string>
+  mount?: MountRef   // present if this is a native mount entry
 }
 ```
 
@@ -422,18 +450,26 @@ canCrossStory("chronicler", config)  // false
 
 ## `stellario/git`
 
-Git integration for version-controlled volumes.
+Git integration for version-controlled volumes + auto sync.
 
-#### `gitCommit(memDir: string, volume: string, message: string, config: StellarioConfig): string | null`
+#### `gitCommit(memDir: string, volume: string, message: string, config: StellarioConfig, entryIds?: string[]): string | null`
 
-Stage and commit a volume's JSONL + MD files. Returns short commit hash on success, `null` if skipped (untracked volume) or failed.
+Stage and commit a volume's JSONL + MD files. After commit, attempts `gitPush` (tolerates network failure silently). Returns short commit hash on success, `null` if skipped (untracked volume) or failed.
 
 Only commits volumes with `isTracked: true` in their profile.
 
 ```typescript
 const hash = gitCommit(memDir, "active", "create: new design decision", config)
-// "a3f2b1c"
+// "a3f2b1c"  (also auto-pushes to remote)
 ```
+
+#### `gitPush(memDir: string): void`
+
+Push commits to remote. Silently fails on network error. Called automatically after every `gitCommit`.
+
+#### `gitPull(memDir: string): void`
+
+Pull remote changes with rebase. Silently fails on network error. Called at session start by the plugin.
 
 #### `isGitRepo(memDir: string): boolean`
 
@@ -451,14 +487,18 @@ Runtime context resolution and project detection.
 
 #### `resolveContext(ctx: ToolContext): ResolvedContext`
 
-Resolve the full runtime context from a `ToolContext`. Loads config and computes paths.
+Resolve the full runtime context from a `ToolContext`. Tries Go resolve first (Path A: global library), falls back to project-scoped config (Path B: legacy). Injects native mounts into `config.volumes` as frozen/readonly.
 
 ```typescript
 import { resolveContext } from "stellario/context"
 
 const resolved = resolveContext({ directory: "/home/user/project", agent: "stellario" })
-// { config: StellarioConfig, projectRoot: "/home/user/project", memDir: "/home/user/project/.stellario", agent: "stellario" }
+// { config, projectRoot, memDir, agent, star: "Sirius", projectName: "valhalla" }
 ```
+
+#### `tryGoResolve(projectRoot: string): GoResolveResult | null`
+
+Call Go `stellario resolve --root <dir>` to find the global library location. Returns null if Go binary unavailable, project not migrated, or resolve fails. Null results expire from cache after 60s.
 
 #### `isRustProject(projectRoot: string): boolean`
 
