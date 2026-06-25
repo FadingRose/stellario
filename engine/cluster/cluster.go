@@ -51,12 +51,14 @@ func ProjectDir(projectName string) string {
 // DeviceID holds the device's identity information.
 type DeviceID struct {
 	ID       string `json:"id"`
+	Star     string `json:"star,omitempty"` // Star name from the constellation (e.g. "Sirius")
 	Hostname string `json:"hostname"`
 	Platform string `json:"platform"`
 	Created  string `json:"created"`
 }
 
 // GetOrCreateDeviceID loads or generates the device identity.
+// Also assigns a star name on first creation.
 func GetOrCreateDeviceID() (*DeviceID, error) {
 	path := DeviceIDPath()
 
@@ -64,6 +66,11 @@ func GetOrCreateDeviceID() (*DeviceID, error) {
 	if data, err := os.ReadFile(path); err == nil {
 		var dev DeviceID
 		if err := unmarshalJSON(data, &dev); err == nil && dev.ID != "" {
+			// Ensure star is assigned (assignStar is stars.go internal, no recursion)
+			if dev.Star == "" {
+				star := ensureStarAssignment(&dev)
+				dev.Star = star
+			}
 			return &dev, nil
 		}
 	}
@@ -74,13 +81,11 @@ func GetOrCreateDeviceID() (*DeviceID, error) {
 		hostname = "unknown"
 	}
 
-	// Generate device ID: platform-short-hostname
 	platform := runtime.GOOS
 	shortHost := hostname
 	if parts := strings.Split(hostname, "."); len(parts) > 0 {
 		shortHost = parts[0]
 	}
-	// Add a random suffix for uniqueness
 	suffix := fmt.Sprintf("%x", time.Now().UnixNano()%0xFFFF)
 	dev := DeviceID{
 		ID:       fmt.Sprintf("%s-%s-%s", platform, shortHost, suffix),
@@ -94,6 +99,9 @@ func GetOrCreateDeviceID() (*DeviceID, error) {
 		return nil, fmt.Errorf("create global dir: %w", err)
 	}
 
+	// Assign star
+	dev.Star = ensureStarAssignment(&dev)
+
 	data, err := marshalJSON(dev)
 	if err != nil {
 		return nil, fmt.Errorf("marshal device id: %w", err)
@@ -103,6 +111,19 @@ func GetOrCreateDeviceID() (*DeviceID, error) {
 	}
 
 	return &dev, nil
+}
+
+// GetStarName returns the star name for the current device (public API).
+// Safe to call after GetOrCreateDeviceID.
+func GetStarName() (string, error) {
+	dev, err := GetOrCreateDeviceID()
+	if err != nil {
+		return "", err
+	}
+	if dev.Star != "" {
+		return dev.Star, nil
+	}
+	return ensureStarAssignment(dev), nil
 }
 
 // ─── Project Map ─────────────────────────────────────────────────────────────

@@ -39,7 +39,12 @@ func RunStatus() int {
 
 	fmt.Println("Stellario Memory Cluster")
 	fmt.Println("═══════════════════════════════════════════════════════")
-	fmt.Printf("Device: %s (%s, %s)\n", dev.ID, dev.Platform, dev.Hostname)
+
+	starName := ""
+	if dev.Star != "" {
+		starName = fmt.Sprintf(" ⋆%s", dev.Star)
+	}
+	fmt.Printf("Device: %s%s (%s, %s)\n", dev.ID, starName, dev.Platform, dev.Hostname)
 
 	if !globalExists {
 		fmt.Println()
