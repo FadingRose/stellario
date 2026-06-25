@@ -1,5 +1,4 @@
 import type { Plugin } from "@opencode-ai/plugin"
-import { join } from "path"
 
 export default (async ({ directory, client }) => {
   return {
@@ -28,19 +27,33 @@ export default (async ({ directory, client }) => {
         const status = buildStatus(directory, agent)
         output.system.push(status)
 
-        // Trigger LSP initialization (fire-and-forget, non-blocking)
+        // LSP init + index-worker recovery (needs config + memDir)
         try {
-          const { loadConfig } = await import("stellario/config")
-          const { triggerInit } = await import("stellario/lsp/manager")
-          const config = loadConfig(directory)
+          const { tryGoResolve } = await import("stellario/context")
+          const goResult = tryGoResolve(directory)
+
+          let config: any
+          let memDir: string
+
+          if (goResult) {
+            const { loadConfigFromPath } = await import("stellario/config")
+            config = loadConfigFromPath(goResult.config_path)
+            memDir = goResult.mem_dir
+          } else {
+            const { loadConfig, getMemoryDir } = await import("stellario/config")
+            const { join } = await import("path")
+            config = loadConfig(directory)
+            memDir = getMemoryDir(config, directory)
+          }
+
           if (config.lsp && Object.keys(config.lsp).length > 0) {
+            const { triggerInit } = await import("stellario/lsp/manager")
             triggerInit(directory, config.lsp)
           }
 
           // Recover interrupted index work (fire-and-forget, non-blocking)
           try {
             const { recoverOnLoad } = await import("stellario/index-worker")
-            const memDir = join(directory, ".opencode", ".stellario")
             recoverOnLoad(memDir, config)
           } catch {
             // index-worker not available — skip

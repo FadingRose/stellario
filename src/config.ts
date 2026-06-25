@@ -68,15 +68,26 @@ export function loadConfig(projectRoot: string): StellarioConfig {
 
   for (const path of candidates) {
     if (existsSync(path)) {
-      const raw = readFileSync(path, "utf-8")
-      const parsed = parseYaml(raw)
-      return validateConfig(parsed, path)
+      return loadConfigFromPath(path)
     }
   }
 
   throw new Error(
     `Stellario config not found. Create .opencode/${CONFIG_FILENAME} or ${CONFIG_FILENAME} in your project root.`
   )
+}
+
+/**
+ * Load and validate config from an explicit file path.
+ * Used when Go resolve provides the config path in the global library.
+ */
+export function loadConfigFromPath(configPath: string): StellarioConfig {
+  if (!existsSync(configPath)) {
+    throw new Error(`Stellario config not found at ${configPath}.`)
+  }
+  const raw = readFileSync(configPath, "utf-8")
+  const parsed = parseYaml(raw)
+  return validateConfig(parsed, configPath)
 }
 
 // =============================================================================

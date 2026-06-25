@@ -134,18 +134,29 @@ func RunMigrate(opts MigrateOptions) (*MigrateResult, error) {
 		return nil, fmt.Errorf("read source dir: %w", err)
 	}
 
+	skippedSymlinks := 0
 	for _, entry := range entries {
-		if entry.IsDir() {
-			// Copy subdirectories (.track, .stellario internal dirs)
-			// For now, skip .git and other hidden dirs
-			if entry.Name() == ".git" {
-				continue
-			}
-			// We'll handle .track specially
+		name := entry.Name()
+
+		// Check for symlinks via Lstat — skip all symlinked files and dirs
+		info, err := os.Lstat(filepath.Join(sourceDir, name))
+		if err != nil {
+			continue
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			skippedSymlinks++
+			fmt.Printf("  ⊘ %s (symlink — skipped)\n", name)
 			continue
 		}
 
-		name := entry.Name()
+		if entry.IsDir() {
+			// Skip .git and other hidden dirs
+			if name == ".git" {
+				continue
+			}
+			continue
+		}
+
 		src := filepath.Join(sourceDir, name)
 		dst := filepath.Join(destDir, name)
 

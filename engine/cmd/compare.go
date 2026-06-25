@@ -113,6 +113,79 @@ func RunDoctorCompare(projectRoot string, projectName string) int {
 	return 0
 }
 
+// RunDoctorCompareNoSync is like RunDoctorCompare but with a noSync option.
+// When noSync is true, it skips the JSONL→SQLite sync step (for fanout verification).
+func RunDoctorCompareNoSync(projectRoot string, projectName string, noSync bool) int {
+	// Resolve source JSONL directory
+	var jsonlDir string
+	var projName string
+
+	if projectName != "" {
+		jsonlDir = cluster.ProjectDir(projectName)
+		projName = projectName
+		if _, err := os.Stat(jsonlDir); os.IsNotExist(err) {
+			fmt.Printf("Project %q not found in global library\n", projectName)
+			return 1
+		}
+	} else {
+		projName = filepath.Base(projectRoot)
+		jsonlDir = filepath.Join(projectRoot, ".opencode", ".stellario")
+		if _, err := os.Stat(jsonlDir); os.IsNotExist(err) {
+			jsonlDir = filepath.Join(projectRoot, ".stellario")
+		}
+		if _, err := os.Stat(jsonlDir); os.IsNotExist(err) {
+			fmt.Printf("Memory directory not found for %s\n", projectRoot)
+			return 1
+		}
+	}
+
+	fmt.Printf("Comparing: %s\n", projName)
+	fmt.Printf("  JSONL:  %s\n", jsonlDir)
+	fmt.Println()
+
+	s, err := store.Open(store.DefaultDBPath())
+	if err != nil {
+		fmt.Printf("Error opening database: %v\n", err)
+		return 1
+	}
+	defer s.Close()
+
+	if !noSync {
+		fmt.Print("Syncing JSONL → SQLite... ")
+		report, err := s.SyncFromJSONL(projName, jsonlDir)
+		if err != nil {
+			fmt.Printf("✗\nSync error: %v\n", err)
+			return 1
+		}
+		fmt.Printf("✓ %s\n", report.Summary())
+		fmt.Println()
+	} else {
+		fmt.Println("(skipping sync — fanout verification mode)")
+		fmt.Println()
+	}
+
+	// Load JSONL entries (ground truth)
+	jsonlEntries := loadJSONLEntriesForCompare(jsonlDir, projName)
+
+	// Load SQLite entries
+	sqliteEntries, err := loadSQLiteEntriesForCompare(s, projName)
+	if err != nil {
+		fmt.Printf("Error loading SQLite entries: %v\n", err)
+		return 1
+	}
+
+	// Compare
+	result := compareEntries(jsonlEntries, sqliteEntries, projName)
+
+	// Report
+	printCompareResult(result)
+
+	if len(result.OnlyJSONL) > 0 || len(result.OnlySQLite) > 0 || len(result.Diffs) > 0 {
+		return 1
+	}
+	return 0
+}
+
 // entryKey is a composite key for comparison.
 type entryKey struct {
 	ID     string

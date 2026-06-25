@@ -1,8 +1,8 @@
 import type { ToolContext, ToolDef, StellarioConfig, MemoryEntry, MemoryRef } from "../types.js"
-import { resolveContext } from "../context.js"
+import { resolveContext, tryGoResolve } from "../context.js"
 import { resolveAgent, canRead, canWrite, isAuthor } from "../permissions.js"
 import { readJsonl, readVolumeIndex, extractTitle, findEntry, writeEntries, generateNextId, dedupeTags, ensureStringArray, ensureArray, today, getLinkedVolumes, getLinkedVolumeSymlinkPath, formatDisplayId, toDisplayId } from "../store.js"
-import { loadConfig, getMemoryDir, getWorkspaceVolume } from "../config.js"
+import { loadConfig, loadConfigFromPath, getMemoryDir, getWorkspaceVolume } from "../config.js"
 import { queryTasks, buildPlanTree } from "../coord/store.js"
 import type { PlanTreeNode } from "../coord/store.js"
 import { getAllActiveLocks } from "../coord/lock.js"
@@ -21,8 +21,19 @@ import { z } from "zod"
  * This is the single source of truth — used by the tool AND the plugin injector.
  */
 export function buildStatus(projectRoot: string, agentName: string): string {
-  const config = loadConfig(projectRoot)
-  const memDir = getMemoryDir(config, projectRoot)
+  // ── Path A: Try Go resolve for global library ──
+  const goResult = tryGoResolve(projectRoot)
+  let config: StellarioConfig
+  let memDir: string
+
+  if (goResult) {
+    config = loadConfigFromPath(goResult.config_path)
+    memDir = goResult.mem_dir
+  } else {
+    // ── Path B: Legacy project-scoped fallback ──
+    config = loadConfig(projectRoot)
+    memDir = getMemoryDir(config, projectRoot)
+  }
 
   const lines: string[] = []
   lines.push(`Memory dir: ${memDir}`)

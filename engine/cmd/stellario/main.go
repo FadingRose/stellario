@@ -75,6 +75,8 @@ func main() {
 		cmdMemorySync(args)
 	case "volume":
 		cmdVolume(args)
+	case "resolve":
+		cmdResolve(args)
 	case "help", "--help", "-h":
 		printHelp()
 	default:
@@ -679,6 +681,13 @@ func cmdProject(args []string) {
 	}
 }
 
+func cmdResolve(args []string) {
+	fs := flag.NewFlagSet("resolve", flag.ExitOnError)
+	root := fs.String("root", ".", "project root directory")
+	fs.Parse(args)
+	os.Exit(cmd.RunResolve(*root))
+}
+
 func printHelp() {
 	fmt.Println(`stellario — graph engine + memory cluster manager
 
@@ -701,6 +710,7 @@ Cluster Management:
   project          Manage project registration (list/register/forget/info/add/remote)
   config           Show/validate/edit config (--global for global library)
   volume           List/stats/grep volumes and entries
+  resolve          Resolve a project dir to its global library location (JSON output)
   memory-sync      Git subtree push/pull per project
   sync             Sync JSONL files into SQLite (bulk import stale volumes)
 
