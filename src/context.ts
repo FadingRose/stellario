@@ -41,9 +41,11 @@ interface GoResolveResult {
 
 /**
  * Cache for Go resolve results, keyed by project root.
- * Avoids repeated execSync calls within the same session.
+ * Null results expire after 60s so transient failures (wrong binary in PATH,
+ * binary not yet installed) auto-retry instead of caching forever.
  */
-const _resolveCache = new Map<string, GoResolveResult | null>()
+const _resolveCache = new Map<string, { result: GoResolveResult | null; ts: number }>()
+const _NULL_CACHE_TTL_MS = 60_000
 
 /**
  * Find the Go stellario binary.
@@ -81,32 +83,49 @@ function findGoBinary(): string | null {
   return null
 }
 
-const _goBin = findGoBinary()
+/**
+ * Lazy Go binary discovery — computed on first use, cached.
+ * NOT a module-level constant so that PATH changes take effect
+ * even if the module was loaded before the binary was installed.
+ */
+let _goBin: string | null | undefined
+
+function getGoBinary(): string | null {
+  if (_goBin !== undefined) return _goBin
+  _goBin = findGoBinary()
+  return _goBin
+}
 
 /**
  * Call Go `stellario resolve --root <dir>` to find the global library location.
  * Returns null if Go is unavailable or the project hasn't been migrated yet.
  */
 export function tryGoResolve(projectRoot: string): GoResolveResult | null {
-  if (!_goBin) return null
+  const goBin = getGoBinary()
+  if (!goBin) return null
 
   const cached = _resolveCache.get(projectRoot)
-  if (cached !== undefined) return cached
+  // Null results expire after TTL; success results cached forever
+  if (cached !== undefined) {
+    if (cached.result !== null) return cached.result
+    if (Date.now() - cached.ts < _NULL_CACHE_TTL_MS) return null
+    _resolveCache.delete(projectRoot)
+  }
 
   try {
     const output = execSync(
-      `"${_goBin}" resolve --root "${projectRoot}"`,
+      `"${goBin}" resolve --root "${projectRoot}"`,
       { stdio: "pipe", timeout: 5000, encoding: "utf-8" },
     )
     const result = JSON.parse(output) as GoResolveResult
     if (!result.exists) {
-      _resolveCache.set(projectRoot, null)
+      _resolveCache.set(projectRoot, { result: null, ts: Date.now() })
       return null
     }
-    _resolveCache.set(projectRoot, result)
+    _resolveCache.set(projectRoot, { result, ts: Date.now() })
     return result
   } catch {
-    _resolveCache.set(projectRoot, null)
+    _resolveCache.set(projectRoot, { result: null, ts: Date.now() })
     return null
   }
 }
