@@ -57,10 +57,17 @@ function findGoBinary(): string | null {
   const envBin = process.env.STELLARIO_BIN
   if (envBin && existsSync(envBin)) return envBin
 
-  // 2. In PATH
+  // 2. In PATH — verify it actually handles 'resolve' (not the Node CLI)
   try {
-    execSync("which stellario", { stdio: "pipe", timeout: 1000 })
-    return "stellario"
+    const which = execSync("which stellario", { stdio: "pipe", timeout: 1000 }).toString().trim()
+    if (which) {
+      try {
+        execSync(`"${which}" resolve --help`, { stdio: "pipe", timeout: 2000 })
+        return which  // confirmed Go binary
+      } catch {
+        // 'stellario' in PATH doesn't support resolve — skip to dev mode
+      }
+    }
   } catch {
     // not in PATH
   }
