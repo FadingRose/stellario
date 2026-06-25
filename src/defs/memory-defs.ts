@@ -19,6 +19,16 @@ import { markPending, unmarkPending, triggerFlush } from "../index-worker.js"
 import { computeAutoRefs, applyAutoRefsPlan, type AutoRefsPlan } from "../auto-refs.js"
 import { SYSTEM_VOLUME_NAMES } from "../config.js"
 
+/**
+ * Resolve project name for Go fanout.
+ * Uses basename of project root as a simple heuristic.
+ * In production, this would use cluster.ResolveProject (git remote based).
+ */
+function resolveProjectName(projectRoot: string): string {
+  const { basename } = require("path")
+  return basename(projectRoot)
+}
+
 // =============================================================================
 // Shared Helpers
 // =============================================================================
@@ -222,6 +232,32 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       if (keywords.length > 0) {
         markPending(ctx.memDir, id)
         triggerFlush(ctx.memDir, ctx.config)
+      }
+
+      // ── Go fanout: mirror this create to SQLite ──
+      // This is the dual-write verification path. TS is ground truth (JSONL).
+      // Go writes a shadow copy to SQLite with the SAME ID (no star suffix).
+      // doctor --compare detects divergence by exact ID match.
+      // If Go is unavailable, the fanout is silently skipped (non-blocking).
+      try {
+        const projectName = resolveProjectName(ctx.projectRoot)
+        const { execSync } = await import("child_process")
+        const goArgs = [
+          "create", "--native",
+          "--id", id,
+          "--project", projectName,
+          "--volume", volumeName,
+          "--content", args.content.trim(),
+          "--author", agent,
+        ]
+        if (tags.length > 0) goArgs.push("--tags", tags.join(","))
+        if (keywords.length > 0) goArgs.push("--keywords", keywords.join(","))
+        execSync(`stellario ${goArgs.map(a => `"${a}"`).join(" ")}`, {
+          stdio: "pipe",
+          timeout: 5000,
+        })
+      } catch {
+        // Go binary not available or errored — silently skip
       }
 
       const displayId = toDisplayId(id, volumeName)

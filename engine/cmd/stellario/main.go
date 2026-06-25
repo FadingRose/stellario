@@ -105,6 +105,8 @@ func cmdCreate(args []string) {
 	tagsStr := fs.String("tags", "", "comma-separated tags")
 	keywordsStr := fs.String("keywords", "", "comma-separated keywords")
 	author := fs.String("author", "cli", "author")
+	native := fs.Bool("native", false, "use native create with star-suffix ID (for fanout)")
+	idFlag := fs.String("id", "", "explicit entry ID (fanout mode: use TS's ID)")
 	frameType := fs.String("frame-type", "assert", "frame type")
 	deriveFrom := fs.String("derive-from", "", "comma-separated entry IDs this derives from")
 	fs.Parse(args)
@@ -114,6 +116,35 @@ func cmdCreate(args []string) {
 		os.Exit(1)
 	}
 
+	// Native create path: star-suffix ID or fanout with provided ID
+	if *native {
+		opts := cmd.CreateOptions{
+			Project:  *project,
+			Volume:   *volume,
+			Content:  *content,
+			Tags:     splitCSV(*tagsStr),
+			Keywords: splitCSV(*keywordsStr),
+			Author:   *author,
+		}
+		if *idFlag != "" {
+			opts.ID = *idFlag
+		}
+		result, err := cmd.RunCreate(opts)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		mode := "native"
+		if opts.ID != "" {
+			mode = "fanout"
+		}
+		_ = mode
+		fmt.Printf("Created [%s] → %s:%s (%s)\n",
+			result.ID, result.Project, result.Volume, mode)
+		return
+	}
+
+	// Legacy create path (existing behavior)
 	s := getDB()
 	defer s.Close()
 
@@ -453,7 +484,14 @@ func cmdSync(args []string) {
 func cmdDoctor(args []string) {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
 	root := fs.String("root", ".", "project root directory")
+	compare := fs.Bool("compare", false, "compare JSONL vs SQLite for this project")
+	compareProject := fs.String("project", "", "project name for --compare (uses global library)")
+	noSync := fs.Bool("no-sync", false, "skip JSONL→SQLite sync before compare (fanout verification)")
 	fs.Parse(args)
+
+	if *compare {
+		os.Exit(cmd.RunDoctorCompareNoSync(*root, *compareProject, *noSync))
+	}
 
 	os.Exit(cmd.RunDoctor(*root))
 }
