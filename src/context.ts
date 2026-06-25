@@ -75,8 +75,6 @@ function findGoBinary(): string | null {
   }
 
   // 3. Dev mode: engine/stellario relative to this module
-  //    This file is at stellario/src/context.ts
-  //    Binary is at stellario/engine/stellario
   const devBin = join(__dirname, "..", "engine", "stellario")
   if (existsSync(devBin)) return devBin
 
@@ -105,7 +103,6 @@ export function tryGoResolve(projectRoot: string): GoResolveResult | null {
   if (!goBin) return null
 
   const cached = _resolveCache.get(projectRoot)
-  // Null results expire after TTL; success results cached forever
   if (cached !== undefined) {
     if (cached.result !== null) return cached.result
     if (Date.now() - cached.ts < _NULL_CACHE_TTL_MS) return null
