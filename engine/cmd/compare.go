@@ -50,8 +50,13 @@ func RunDoctorCompare(projectRoot string, projectName string) int {
 	var projName string
 
 	if projectName != "" {
-		// Use global library
-		jsonlDir = cluster.ProjectDir(projectName)
+		// Use global library — THIS device's subdir (device-relative)
+		dir, err := cluster.LocalProjectDir(projectName)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			return 1
+		}
+		jsonlDir = dir
 		projName = projectName
 		if _, err := os.Stat(jsonlDir); os.IsNotExist(err) {
 			fmt.Printf("Project %q not found in global library\n", projectName)
@@ -121,7 +126,12 @@ func RunDoctorCompareNoSync(projectRoot string, projectName string, noSync bool)
 	var projName string
 
 	if projectName != "" {
-		jsonlDir = cluster.ProjectDir(projectName)
+		dir, err := cluster.LocalProjectDir(projectName)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			return 1
+		}
+		jsonlDir = dir
 		projName = projectName
 		if _, err := os.Stat(jsonlDir); os.IsNotExist(err) {
 			fmt.Printf("Project %q not found in global library\n", projectName)

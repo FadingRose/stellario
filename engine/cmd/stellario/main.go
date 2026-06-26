@@ -77,6 +77,8 @@ func main() {
 		cmdStatus(args)
 	case "migrate":
 		cmdMigrate(args)
+	case "migrate-device":
+		cmdMigrateDevice()
 	case "project":
 		cmdProject(args)
 	case "config":
@@ -617,6 +619,10 @@ func cmdMigrate(args []string) {
 	_ = result
 }
 
+func cmdMigrateDevice() {
+	os.Exit(cmd.RunMigrateDeviceRelative())
+}
+
 func cmdProject(args []string) {
 	if len(args) == 0 {
 		fmt.Println("Usage: stellario project <list|register|forget|info|add|remote> [args]")
@@ -724,6 +730,7 @@ Cluster Management:
   status            Show cluster overview (all projects, volumes, sync state)
   doctor            Diagnose config + memory integrity (read-only)
   migrate           Copy memory data into the global library (~/.stellario/)
+  migrate-device    One-time migration: flat → device-relative layout + strip ID suffixes
   project           Manage project registration (list/register/forget/info/add/remote)
   config            Show/validate/edit config (--global for global library)
   volume            List/stats/grep volumes and entries

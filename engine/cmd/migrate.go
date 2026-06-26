@@ -69,8 +69,11 @@ func RunMigrate(opts MigrateOptions) (*MigrateResult, error) {
 		fmt.Printf("  Git remote: %s\n", remote)
 	}
 
-	// Check if project already exists in global library
-	destDir := cluster.ProjectDir(projectName)
+	// Destination is THIS device's subdir in the project container (device-relative model)
+	destDir, err := cluster.LocalProjectDir(projectName)
+	if err != nil {
+		return nil, fmt.Errorf("resolve device dir: %w", err)
+	}
 	if _, err := os.Stat(destDir); err == nil {
 		fmt.Printf("  ⚠ Project already exists in global library: %s\n", destDir)
 		fmt.Printf("    Migrate will overwrite JSONL files (git history preserved).\n")

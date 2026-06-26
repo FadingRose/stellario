@@ -109,10 +109,9 @@ func RunStatus() int {
 			lastWrite = formatRelativeTime(mt)
 		}
 
-		// Check config presence
+		// Check config presence (lives in device subdir, or container)
 		configStatus := "✓"
-		configPath := filepath.Join(projectDir, "stellario.yaml")
-		if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		if findProjectConfig(projectDir) == "" {
 			configStatus = "⚠ no config"
 		}
 
@@ -185,23 +184,34 @@ type projectStatusLine struct {
 	DirExists   string
 }
 
-// getLastModified finds the most recent mtime among .jsonl files in a directory.
+// getLastModified finds the most recent mtime among .jsonl files in a directory
+// and its immediate device-id subdirectories (device-relative layout).
 func getLastModified(dir string) time.Time {
 	var latest time.Time
-	files, err := globFiles(filepath.Join(dir, "*.jsonl"))
-	if err != nil {
-		return time.Time{}
-	}
-	for _, f := range files {
-		if strings.Contains(filepath.Base(f), "keywords-index") || strings.Contains(filepath.Base(f), ".index-pending") {
-			continue
+	candidates := []string{filepath.Join(dir, "*.jsonl")}
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+				candidates = append(candidates, filepath.Join(dir, e.Name(), "*.jsonl"))
+			}
 		}
-		info, err := os.Stat(f)
+	}
+	for _, pattern := range candidates {
+		files, err := globFiles(pattern)
 		if err != nil {
 			continue
 		}
-		if info.ModTime().After(latest) {
-			latest = info.ModTime()
+		for _, f := range files {
+			if strings.Contains(filepath.Base(f), "keywords-index") || strings.Contains(filepath.Base(f), ".index-pending") {
+				continue
+			}
+			info, err := os.Stat(f)
+			if err != nil {
+				continue
+			}
+			if info.ModTime().After(latest) {
+				latest = info.ModTime()
+			}
 		}
 	}
 	return latest

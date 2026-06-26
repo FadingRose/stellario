@@ -25,7 +25,7 @@ func RunProjectAdd(remoteURL string) int {
 	// Ensure global library is initialized
 	_, err := cluster.InitGlobal()
 	if err != nil {
-		fmt.Printf("Error initializing global library: %w\n", err)
+		fmt.Printf("Error initializing global library: %v\n", err)
 		return 1
 	}
 
@@ -130,7 +130,12 @@ func runMigrateSubtree(projectRoot, projectName string) int {
 		return 1
 	}
 
-	projectDir := cluster.ProjectDir(projectName)
+	// Device-relative: data lands in THIS device's subdir
+	deviceDir, err := cluster.LocalProjectDir(projectName)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return 1
+	}
 
 	// Resolve source .stellario directory
 	sourceDir := filepath.Join(projectRoot, ".opencode", ".stellario")
@@ -144,25 +149,25 @@ func runMigrateSubtree(projectRoot, projectName string) int {
 
 	fmt.Printf("Importing: %s\n", projectName)
 	fmt.Printf("  Source: %s\n", sourceDir)
-	fmt.Printf("  Target: %s\n", projectDir)
+	fmt.Printf("  Target: %s\n", deviceDir)
 	fmt.Println()
 
-	// Create target dir
-	if err := os.MkdirAll(projectDir, 0755); err != nil {
+	// Create target device dir
+	if err := os.MkdirAll(deviceDir, 0755); err != nil {
 		fmt.Printf("Error creating target: %v\n", err)
 		return 1
 	}
 
-	// Copy files (same logic as migrate)
-	totalEntries := copyStellarioData(sourceDir, projectDir)
+	// Copy data into device dir
+	totalEntries := copyStellarioData(sourceDir, deviceDir)
 
-	// Also copy config
+	// Also copy config into device dir
 	configSrc := filepath.Join(projectRoot, ".opencode", "stellario.yaml")
 	if _, err := os.Stat(configSrc); err != nil {
 		configSrc = filepath.Join(projectRoot, "stellario.yaml")
 	}
 	if _, err := os.Stat(configSrc); err == nil {
-		copyFile(configSrc, filepath.Join(projectDir, "stellario.yaml"))
+		copyFile(configSrc, filepath.Join(deviceDir, "stellario.yaml"))
 		fmt.Printf("  ✓ stellario.yaml\n")
 	}
 

@@ -179,9 +179,34 @@ function parseJsonlContent(content: string, volumeHint: string): MemoryEntry[] {
 /**
  * Read all entries for a volume.
  * Supports index-aware multi-file volumes, single-file fallback,
- * and native mounts (reads from source_path in global library).
+ * native mounts (reads from source_path in global library), and
+ * auto-mounts (sibling device volumes, set by resolveContext).
  */
+
+// Ephemeral auto-mount registry: alias → source .jsonl path.
+// Populated by resolveContext from Go resolve `siblings`. Lets readJsonl
+// transparently read sibling-device volumes (readonly/frozen) without
+// persisting anything to disk.
+const _autoMounts = new Map<string, string>()
+
+/**
+ * Set the auto-mount map for the current resolution. Called by resolveContext.
+ * Replaces any previous registration.
+ */
+export function setAutoMounts(mounts: Map<string, string>): void {
+  _autoMounts.clear()
+  for (const [alias, path] of mounts) _autoMounts.set(alias, path)
+}
+
 export function readJsonl(memDir: string, volume: string): MemoryEntry[] {
+  // ── Auto-mount (sibling device volume): read directly from source path ──
+  const autoSource = _autoMounts.get(volume)
+  if (autoSource) {
+    if (!existsSync(autoSource)) return []
+    const content = readFileSync(autoSource, "utf-8")
+    return parseJsonlContent(content, volume)
+  }
+
   const indexEntry = readVolumeIndex(memDir).find((e) => e.volume === volume)
 
   // ── Native mount: read directly from source path ──
@@ -256,7 +281,11 @@ function primaryFileForVolume(memDir: string, volume: string): string {
  * Generate next ID for a volume.
  * - scratch profile: short hash (e.g., "d7f3a")
  * - all others: sequential prefix + nonce (e.g., "a42", "h03")
- *   With star suffix for cross-device uniqueness (e.g., "a42.Sirius")
+ *
+ * In the device-relative model, IDs carry NO star suffix: each device writes
+ * into its own device-id dir with a per-device nonce, so IDs are naturally
+ * unique within their dir and need no suffix for cross-device disambiguation.
+ * (The `star` param is accepted for API compatibility but ignored.)
  */
 export function generateNextId(memDir: string, volume: string, config: StellarioConfig, star?: string): string {
   const def = config.volumes[volume]
@@ -269,11 +298,10 @@ export function generateNextId(memDir: string, volume: string, config: Stellario
   }
 
   const prefix = getVolumeIdPrefix(config, volume)
-  const suffix = star ? `.${star}` : ""
 
   const nonce = bumpNonce(memDir, volume)
   if (nonce !== null) {
-    return `${prefix}${nonce}${suffix}`
+    return `${prefix}${nonce}`
   }
 
   // Legacy fallback: scan max ID
@@ -284,15 +312,14 @@ export function generateNextId(memDir: string, volume: string, config: Stellario
   ]
 
   for (const entry of allEntries) {
-    // Strip star suffix if present for nonce comparison
-    const rawId = entry.id.split(".")[0]
+    const rawId = stripStarSuffix(entry.id.split(".")[0])
     if (rawId.startsWith(prefix)) {
       const num = parseInt(rawId.slice(prefix.length), 10)
       if (!isNaN(num) && num > maxNum) maxNum = num
     }
   }
 
-  return `${prefix}${String(maxNum + 1).padStart(2, "0")}${suffix}`
+  return `${prefix}${String(maxNum + 1).padStart(2, "0")}`
 }
 
 function generateShortHashId(def: { idPrefix?: string }): string {

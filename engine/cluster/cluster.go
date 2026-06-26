@@ -22,11 +22,13 @@ func GlobalDir() string {
 }
 
 // ProjectsDir returns the projects subdirectory inside the global library.
+// This is the CONTAINER holding per-device subdirectories.
 func ProjectsDir() string {
 	return filepath.Join(GlobalDir(), "projects")
 }
 
-// GlobalDir returns the global-scoped volumes directory.
+// GlobalVolumesDir returns the global-scoped volumes CONTAINER directory.
+// Stellario's own memory lives under per-device subdirs of this.
 func GlobalVolumesDir() string {
 	return filepath.Join(GlobalDir(), "global")
 }
@@ -41,9 +43,89 @@ func DeviceIDPath() string {
 	return filepath.Join(GlobalDir(), ".device-id")
 }
 
-// ProjectDir returns the memory directory for a specific project in the global library.
+// ProjectDir returns the CONTAINER directory for a project in the global library.
+// Data lives in device-id subdirs beneath this: projects/{name}/{device-id}/.
 func ProjectDir(projectName string) string {
 	return filepath.Join(ProjectsDir(), projectName)
+}
+
+// ─── Device-Relative Paths ───────────────────────────────────────────────────
+//
+// In the device-relative model, each device writes its memory into its own
+// device-id subdirectory. Other devices' dirs are auto-mounted (readonly)
+// by the TS layer for cross-device visibility.
+
+// DeviceProjectDir returns the per-device memory directory for a project:
+// projects/{projectName}/{deviceID}/
+func DeviceProjectDir(projectName, deviceID string) string {
+	return filepath.Join(ProjectDir(projectName), deviceID)
+}
+
+// LocalProjectDir returns THIS device's memory directory for a project.
+// This is where reads/writes for the current device go.
+func LocalProjectDir(projectName string) (string, error) {
+	devID, err := LocalDeviceID()
+	if err != nil {
+		return "", err
+	}
+	return DeviceProjectDir(projectName, devID), nil
+}
+
+// DeviceGlobalDir returns the per-device global memory directory:
+// global/{deviceID}/
+func DeviceGlobalDir(deviceID string) string {
+	return filepath.Join(GlobalVolumesDir(), deviceID)
+}
+
+// LocalGlobalDir returns THIS device's global memory directory.
+func LocalGlobalDir() (string, error) {
+	devID, err := LocalDeviceID()
+	if err != nil {
+		return "", err
+	}
+	return DeviceGlobalDir(devID), nil
+}
+
+// LocalDeviceID returns the current device's ID string, generating it if needed.
+func LocalDeviceID() (string, error) {
+	dev, err := GetOrCreateDeviceID()
+	if err != nil {
+		return "", err
+	}
+	return dev.ID, nil
+}
+
+// ListSiblingDeviceDirs returns the paths of all device-id subdirectories
+// under a project container, EXCLUDING the local device's own dir.
+// Used by resolve to build the auto-mount sibling list.
+func ListSiblingDeviceDirs(projectName string) ([]string, error) {
+	localID, err := LocalDeviceID()
+	if err != nil {
+		return nil, err
+	}
+	container := ProjectDir(projectName)
+	entries, err := os.ReadDir(container)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var siblings []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		if name == localID {
+			continue // skip self
+		}
+		siblings = append(siblings, filepath.Join(container, name))
+	}
+	return siblings, nil
 }
 
 // ─── Device Identity ─────────────────────────────────────────────────────────
@@ -66,11 +148,11 @@ func GetOrCreateDeviceID() (*DeviceID, error) {
 	if data, err := os.ReadFile(path); err == nil {
 		var dev DeviceID
 		if err := unmarshalJSON(data, &dev); err == nil && dev.ID != "" {
-			// Ensure star is assigned (assignStar is stars.go internal, no recursion)
-			if dev.Star == "" {
-				star := ensureStarAssignment(&dev)
-				dev.Star = star
-			}
+			// Ensure a star name is assigned AND recorded in the local .stars.json.
+			// (For devices predating the .stars.json model, this migrates the
+			// existing star into the map. Idempotent and cheap.)
+			star := ensureStarAssignment(&dev)
+			dev.Star = star
 			return &dev, nil
 		}
 	}
@@ -327,6 +409,11 @@ func InitGlobal() (*InitResult, error) {
 	}
 	result.DeviceID = dev
 
+	// Ensure this device's global memory subdir exists (device-relative model)
+	if err := os.MkdirAll(DeviceGlobalDir(dev.ID), 0755); err != nil {
+		return nil, fmt.Errorf("create device global dir: %w", err)
+	}
+
 	// Project map
 	pm, err := LoadProjectMap()
 	if err != nil {
@@ -345,7 +432,7 @@ func InitGlobal() (*InitResult, error) {
 		result.GitInitialized = true
 
 		// Write .gitignore for device-local files
-		gitignore := ".project-map.json\n.device-id\n*.db\n*.db-wal\n*.db-shm\n"
+		gitignore := ".project-map.json\n.device-id\n.stars.json\n*.db\n*.db-wal\n*.db-shm\n"
 		os.WriteFile(filepath.Join(gd, ".gitignore"), []byte(gitignore), 0644)
 	}
 

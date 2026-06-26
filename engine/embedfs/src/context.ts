@@ -1,10 +1,10 @@
-import { existsSync, readFileSync } from "fs"
+import { existsSync, readFileSync, readdirSync } from "fs"
 import { join } from "path"
 import { execSync } from "child_process"
 import type { StellarioConfig, ToolContext, VolumeDef } from "./types.js"
 import { loadConfig, loadConfigFromPath, getMemoryDir } from "./config.js"
 import { initGitRepo, migrateTrackMd } from "./git.js"
-import { readMounts } from "./store.js"
+import { readMounts, setAutoMounts } from "./store.js"
 
 // =============================================================================
 // Context Resolution
@@ -30,6 +30,12 @@ let _trackInitialized = false
 
 // ─── Go Resolve Bridge ──────────────────────────────────────────────────────
 
+interface SiblingDevice {
+  device_id: string
+  star: string
+  path: string
+}
+
 interface GoResolveResult {
   project: string
   source: string
@@ -37,6 +43,7 @@ interface GoResolveResult {
   config_path: string
   exists: boolean
   star: string
+  siblings?: SiblingDevice[]
 }
 
 /**
@@ -161,6 +168,49 @@ function injectMounts(config: StellarioConfig, memDir: string): void {
   }
 }
 
+/**
+ * Inject sibling-device volumes as auto-mounts (frozen/readonly).
+ * Each sibling device's volumes become visible as `{star}-{volume}`.
+ * This is the cross-device visibility mechanism in the device-relative model:
+ * the local device reads its own dir; sibling dirs are mounted readonly.
+ *
+ * Builds both the ephemeral source-path registry (for readJsonl) and the
+ * frozen VolumeDefs (so search/status/etc. see them as known volumes).
+ */
+function injectAutoMounts(config: StellarioConfig, siblings: SiblingDevice[] | undefined): void {
+  const autoMounts = new Map<string, string>()
+  if (siblings && siblings.length > 0) {
+    for (const sib of siblings) {
+      const star = sib.star || sib.device_id
+      let entries: string[]
+      try {
+        entries = readdirSync(sib.path)
+      } catch {
+        continue
+      }
+      for (const name of entries) {
+        // Only top-level single-file volumes (v1; sharded volumes are skipped)
+        if (!name.endsWith(".jsonl")) continue
+        if (name === "volumes.jsonl" || name === "keywords-index.jsonl" ||
+            name === "intent-log.jsonl" || name.includes(".index-pending")) {
+          continue
+        }
+        const volname = name.slice(0, -".jsonl".length)
+        const alias = `${star}-${volname}`
+        const sourcePath = join(sib.path, name)
+        autoMounts.set(alias, sourcePath)
+        if (!config.volumes[alias]) {
+          config.volumes[alias] = {
+            profile: "frozen",
+            boundaries: { read: ["all"], write: [] },
+          }
+        }
+      }
+    }
+  }
+  setAutoMounts(autoMounts)
+}
+
 export function resolveContext(ctx: ToolContext): ResolvedContext {
   // ── Path A: Try Go resolve ──
   const goResult = tryGoResolve(ctx.directory)
@@ -175,6 +225,8 @@ export function resolveContext(ctx: ToolContext): ResolvedContext {
 
     // Inject native mounts into config
     injectMounts(config, memDir)
+    // Inject sibling-device auto-mounts (cross-device visibility)
+    injectAutoMounts(config, goResult.siblings)
 
     return {
       config,
@@ -198,6 +250,8 @@ export function resolveContext(ctx: ToolContext): ResolvedContext {
 
   // Inject native mounts (works in legacy mode too)
   injectMounts(config, memDir)
+  // No siblings in legacy mode — clear any stale auto-mount registry
+  injectAutoMounts(config, [])
 
   return {
     config,

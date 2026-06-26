@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"stellario/engine/cluster"
 	"stellario/engine/store"
 	"stellario/engine/types"
 )
@@ -34,8 +33,10 @@ type CreateResult struct {
 // RunCreate writes an entry directly to SQLite.
 //
 // Two modes:
-//   1. Fanout (ID provided): use TS's ID exactly, no suffix. For dual-write verification.
-//   2. Native (ID empty): generate ID with star suffix (a16.Sirius). For future standalone Go.
+//   1. Fanout (ID provided): use TS's ID exactly.
+//   2. Native (ID empty): generate a plain sequential ID (no star suffix —
+//      the device-relative model uses per-device nonces in the device's own
+//      dir, so no suffix is needed for cross-device uniqueness).
 func RunCreate(opts CreateOptions) (*CreateResult, error) {
 	if opts.Volume == "" {
 		return nil, fmt.Errorf("volume is required")
@@ -47,14 +48,8 @@ func RunCreate(opts CreateOptions) (*CreateResult, error) {
 	starName := ""
 	id := opts.ID
 
-	// If no ID provided (native mode), generate one with star suffix
+	// If no ID provided (native mode), generate a plain sequential ID.
 	if id == "" {
-		var err error
-		starName, err = cluster.GetStarName()
-		if err != nil {
-			return nil, fmt.Errorf("get star name: %w", err)
-		}
-
 		s, err := store.Open(store.DefaultDBPath())
 		if err != nil {
 			return nil, fmt.Errorf("open db: %w", err)
@@ -68,7 +63,7 @@ func RunCreate(opts CreateOptions) (*CreateResult, error) {
 		s.Close()
 
 		prefix := volumePrefix(opts.Volume)
-		id = fmt.Sprintf("%s%d.%s", prefix, nonce, starName)
+		id = fmt.Sprintf("%s%d", prefix, nonce)
 	}
 
 	// Open SQLite for write

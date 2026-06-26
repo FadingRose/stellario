@@ -60,119 +60,112 @@ var StarCatalog = []StarEntry{
 	{"Hamal", "α Ari", "Aries", 2.01},
 }
 
-// StarConstellation holds the global registry of device → star assignments.
-// This file IS synced (tracked in git), so all devices know each other's stars.
-type StarConstellation struct {
-	Stars map[string]StarAssignment `json:"stars"`
+// StarMap is the LOCAL registry mapping device-id → star name.
+// This file (.stars.json) is NOT synced — each device maintains its own
+// perspective on what to call the other devices it has seen (like SSH
+// config Host aliases). Star names are display-only; storage and refs
+// use device-id, so renaming never affects data.
+type StarMap struct {
+	Stars map[string]string `json:"stars"` // device-id → star name
 }
 
-// StarAssignment maps a star name to a device.
-type StarAssignment struct {
-	DeviceID  string `json:"device_id"`
-	Hostname  string `json:"hostname"`
-	Platform  string `json:"platform"`
-	AssignedAt string `json:"assigned_at"`
+// StarsMapPath returns the path to the local .stars.json (not synced).
+func StarsMapPath() string {
+	return joinPath(GlobalDir(), ".stars.json")
 }
 
-// ConstellationPath returns the path to the synced constellation registry.
-func ConstellationPath() string {
-	return joinPath(GlobalDir(), ".constellation.json")
-}
-
-// LoadConstellation reads the global star registry.
-func LoadConstellation() (*StarConstellation, error) {
-	data, err := readFile(ConstellationPath())
+// LoadStars reads the local star map.
+func LoadStars() (*StarMap, error) {
+	data, err := readFile(StarsMapPath())
 	if isNotExist(err) {
-		return &StarConstellation{Stars: map[string]StarAssignment{}}, nil
+		return &StarMap{Stars: map[string]string{}}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 
-	var c StarConstellation
-	if err := jsonUnmarshal(data, &c); err != nil {
+	var sm StarMap
+	if err := jsonUnmarshal(data, &sm); err != nil {
 		return nil, err
 	}
-	if c.Stars == nil {
-		c.Stars = map[string]StarAssignment{}
+	if sm.Stars == nil {
+		sm.Stars = map[string]string{}
 	}
-	return &c, nil
+	return &sm, nil
 }
 
-// Save writes the constellation to disk.
-func (c *StarConstellation) Save() error {
-	data, err := jsonMarshalIndent(c)
+// Save writes the local star map to disk.
+func (sm *StarMap) Save() error {
+	data, err := jsonMarshalIndent(sm)
 	if err != nil {
 		return err
 	}
-	return writeFile(ConstellationPath(), data)
+	return writeFile(StarsMapPath(), data)
 }
 
-// AssignedStarNames returns the set of already-assigned star names.
-func (c *StarConstellation) AssignedStarNames() map[string]bool {
-	taken := make(map[string]bool, len(c.Stars))
-	for name := range c.Stars {
+// usedStarNames returns the set of star names already assigned in this map.
+func (sm *StarMap) usedStarNames() map[string]bool {
+	taken := make(map[string]bool, len(sm.Stars))
+	for _, name := range sm.Stars {
 		taken[name] = true
 	}
 	return taken
 }
 
-// AssignStar assigns the first available star from the catalog to a device.
-// Returns the assigned star name.
-func AssignStar(c *StarConstellation, dev *DeviceID) string {
-	taken := c.AssignedStarNames()
-
+// assignFreeStar picks the first catalog star not already used in this map.
+// Falls back to a synthetic name if the catalog is exhausted.
+func (sm *StarMap) assignFreeStar(deviceID string) string {
+	taken := sm.usedStarNames()
 	for _, star := range StarCatalog {
 		if !taken[star.Name] {
-			c.Stars[star.Name] = StarAssignment{
-				DeviceID:   dev.ID,
-				Hostname:   dev.Hostname,
-				Platform:   dev.Platform,
-				AssignedAt: nowISO(),
-			}
+			sm.Stars[deviceID] = star.Name
 			return star.Name
 		}
 	}
-
-	// Catalog exhausted (40+ devices) — fall back to device ID hash
-	return dev.ID
+	// Catalog exhausted — synthesize from device-id hash tail
+	name := "Star-" + deviceID
+	sm.Stars[deviceID] = name
+	return name
 }
 
-// FindStarByDevice returns the star name assigned to a device, or "" if not found.
-func (c *StarConstellation) FindStarByDevice(deviceID string) string {
-	for name, assignment := range c.Stars {
-		if assignment.DeviceID == deviceID {
-			return name
-		}
+// StarNameForDevice resolves the star name for a device-id from this device's
+// local perspective, assigning one if this device has never seen it before.
+// Always persists the assignment. Returns "" on error.
+func StarNameForDevice(deviceID string) string {
+	if deviceID == "" {
+		return ""
 	}
-	return ""
-}
-
-// ensureStarAssignment makes sure the device has a star name assigned.
-// Called by GetOrCreateDeviceID — no recursion risk.
-// Returns the star name (empty string on error).
-func ensureStarAssignment(dev *DeviceID) string {
-	if dev.Star != "" {
-		return dev.Star
-	}
-
-	// Check constellation for existing assignment
-	c, err := LoadConstellation()
+	sm, err := LoadStars()
 	if err != nil {
 		return ""
 	}
+	if name, ok := sm.Stars[deviceID]; ok {
+		return name
+	}
+	name := sm.assignFreeStar(deviceID)
+	_ = sm.Save()
+	return name
+}
 
-	star := c.FindStarByDevice(dev.ID)
-	if star == "" {
-		// Assign a new star
-		star = AssignStar(c, dev)
-		c.Save()
+// ensureStarAssignment makes sure the device has a star name assigned in the
+// LOCAL star map. Called by GetOrCreateDeviceID — no recursion risk.
+// Returns the star name (empty string on error).
+func ensureStarAssignment(dev *DeviceID) string {
+	if dev.Star != "" {
+		// Ensure the local map also records this name (migration from old model).
+		sm, err := LoadStars()
+		if err == nil {
+			if sm.Stars[dev.ID] == "" {
+				sm.Stars[dev.ID] = dev.Star
+				_ = sm.Save()
+			}
+		}
+		return dev.Star
 	}
 
-	// Persist star to device-id
+	star := StarNameForDevice(dev.ID)
 	dev.Star = star
 	saveDeviceID(dev)
-
 	return star
 }
 

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 
@@ -48,11 +47,13 @@ func RunSetupWithVersion(version string) int {
 		fmt.Printf("  ✓ Already exists: %s\n", cluster.GlobalDir())
 	}
 
-	// Pull remote changes before star assignment — ensures we see
-	// stars already claimed by other devices.
-	pullRemoteConstellation()
+	// Migrate flat → device-relative layout (idempotent) + remove legacy registry
+	step++
+	fmt.Printf("\n[%d] Device-relative layout\n", step)
+	migrateDeviceRelativeSilent()
+	removeLegacyConstellation()
 
-	// Step 2: Star name
+	// Step 2: Star name (local .stars.json — not synced; each device has its own perspective)
 	step++
 	fmt.Printf("\n[%d] Device identity\n", step)
 	dev, err := cluster.GetOrCreateDeviceID()
@@ -62,8 +63,6 @@ func RunSetupWithVersion(version string) int {
 	}
 	if dev.Star != "" {
 		fmt.Printf("  ⋆ Star: %s (%s)\n", dev.Star, dev.ID)
-		// Push constellation update so other devices see this star is taken
-		pushConstellationUpdate()
 	} else {
 		fmt.Printf("  ⚠ No star assigned\n")
 	}
@@ -404,58 +403,31 @@ func getShareDir() string {
 var _ embed.FS
 var _ = embedfs.Files
 
-// pullRemoteConstellation does a git pull on the global library before
-// star assignment. This ensures the constellation registry is up-to-date
-// with stars claimed by other devices.
-//
-// Silently skips if no remote configured or network unavailable.
-func pullRemoteConstellation() {
-	globalDir := cluster.GlobalDir()
-
-	// Check if remote exists
-	cmd := exec.Command("git", "remote", "get-url", "origin")
-	cmd.Dir = globalDir
-	if err := cmd.Run(); err != nil {
-		return // no remote — first device, nothing to pull
+// migrateDeviceRelativeSilent runs the device-relative migration without the
+// standalone header/footer — used by setup as an automatic step.
+func migrateDeviceRelativeSilent() {
+	dev, err := cluster.GetOrCreateDeviceID()
+	if err != nil {
+		return
 	}
-
-	// Check if there are any commits (empty repo can't pull)
-	cmd = exec.Command("git", "rev-parse", "HEAD")
-	cmd.Dir = globalDir
-	if err := cmd.Run(); err != nil {
-		return // no commits yet
+	migrated, stripped, report := migrateDeviceRelativeCore(dev.ID)
+	if migrated == 0 {
+		fmt.Printf("  ✓ Already on device-relative layout\n")
+		return
 	}
-
-	// Pull with rebase
-	cmd = exec.Command("git", "pull", "--rebase", "origin", "HEAD")
-	cmd.Dir = globalDir
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	_ = cmd.Run() // silent — failures are expected (no remote, network down)
+	for _, line := range report {
+		fmt.Println(line)
+	}
+	fmt.Printf("  ✓ Moved %d items, stripped %d suffixed IDs\n", migrated, stripped)
 }
 
-// pushConstellationUpdate commits and pushes the constellation registry
-// after a new star is assigned. This claims the star so other devices
-// won't take it.
-//
-// Silently skips if no remote configured or network unavailable.
-func pushConstellationUpdate() {
-	globalDir := cluster.GlobalDir()
-
-	// Stage constellation
-	cmd := exec.Command("git", "add", ".constellation.json")
-	cmd.Dir = globalDir
-	cmd.Run()
-
-	// Commit (may be no-op if unchanged)
-	cmd = exec.Command("git", "commit", "-m", "constellation: star assignment update")
-	cmd.Dir = globalDir
-	cmd.Run()
-
-	// Push
-	cmd = exec.Command("git", "push", "origin", "HEAD")
-	cmd.Dir = globalDir
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	_ = cmd.Run() // silent
+// removeLegacyConstellation deletes the old synced .constellation.json,
+// replaced by the local-only .stars.json in the device-relative model.
+func removeLegacyConstellation() {
+	path := filepath.Join(cluster.GlobalDir(), ".constellation.json")
+	if _, err := os.Stat(path); err == nil {
+		if err := os.Remove(path); err == nil {
+			fmt.Printf("  ✓ Removed legacy .constellation.json (now .stars.json, local-only)\n")
+		}
+	}
 }

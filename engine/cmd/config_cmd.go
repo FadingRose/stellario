@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 
 	"stellario/engine/cluster"
 	"stellario/engine/config"
@@ -140,7 +139,7 @@ func RunConfigShowGlobal() int {
 
 	for name := range pm.Projects {
 		projectDir := cluster.ProjectDir(name)
-		configPath := filepath.Join(projectDir, "stellario.yaml")
+		configPath := findProjectConfig(projectDir)
 
 		fmt.Printf("Project: %s\n", name)
 		if _, err := os.Stat(configPath); err == nil {

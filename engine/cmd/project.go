@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -200,25 +201,53 @@ type volumeInfo struct {
 	EntryCount int
 }
 
+// listVolumeInfo enumerates volumes and entry counts in a directory.
+// In the device-relative model, data lives one level down in device-id
+// subdirs. This recurses into immediate subdirectories and aggregates
+// counts by volume name, so passing a project container yields totals
+// across all devices. Passing a single device dir still works (no subdirs).
 func listVolumeInfo(projectDir string) []volumeInfo {
-	var volumes []volumeInfo
+	agg := map[string]int{}
+	order := []string{}
 
-	files, err := globFiles(filepath.Join(projectDir, "*.jsonl"))
-	if err != nil {
-		return volumes
-	}
-
-	for _, file := range files {
-		base := filepath.Base(file)
-		if strings.Contains(base, "keywords-index") || strings.Contains(base, ".index-pending") {
-			continue
+	scanVolumeFiles := func(files []string) {
+		for _, file := range files {
+			base := filepath.Base(file)
+			if base == "volumes.jsonl" ||
+				strings.Contains(base, "keywords-index") || strings.Contains(base, ".index-pending") {
+				continue
+			}
+			name := strings.TrimSuffix(base, ".jsonl")
+			count, _ := countEntriesInJSONL(file)
+			if _, ok := agg[name]; !ok {
+				order = append(order, name)
+			}
+			agg[name] += count
 		}
-
-		name := strings.TrimSuffix(base, ".jsonl")
-		count, _ := countEntriesInJSONL(file)
-		volumes = append(volumes, volumeInfo{Name: name, EntryCount: count})
 	}
 
+	// Top-level .jsonl files (single-device dir or legacy flat layout)
+	if files, err := globFiles(filepath.Join(projectDir, "*.jsonl")); err == nil {
+		scanVolumeFiles(files)
+	}
+
+	// Recurse one level into device-id subdirs (device-relative layout)
+	if entries, err := os.ReadDir(projectDir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			sub := filepath.Join(projectDir, e.Name())
+			if files, err := globFiles(filepath.Join(sub, "*.jsonl")); err == nil {
+				scanVolumeFiles(files)
+			}
+		}
+	}
+
+	var volumes []volumeInfo
+	for _, name := range order {
+		volumes = append(volumes, volumeInfo{Name: name, EntryCount: agg[name]})
+	}
 	return volumes
 }
 

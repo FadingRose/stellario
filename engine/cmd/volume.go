@@ -52,9 +52,9 @@ func RunVolumeStats(args []string) int {
 	}
 
 	projectDir := cluster.ProjectDir(projectName)
-	jsonlPath := filepath.Join(projectDir, volumeName+".jsonl")
+	jsonlPath := findVolumeFile(projectDir, volumeName)
 
-	if _, err := os.Stat(jsonlPath); os.IsNotExist(err) {
+	if jsonlPath == "" {
 		fmt.Printf("Volume %q not found in project %q\n", volumeName, projectName)
 		return 1
 	}
@@ -65,9 +65,9 @@ func RunVolumeStats(args []string) int {
 		return 0
 	}
 
-	// Load config to get profile
+	// Load config to get profile (config lives in device dir, or container)
 	var profile string
-	configPath := filepath.Join(projectDir, "stellario.yaml")
+	configPath := findProjectConfig(projectDir)
 	if vres, err := config.LoadAndValidatePath(configPath); err == nil && vres.Config != nil {
 		if vol, ok := vres.Config.Volumes[volumeName]; ok {
 			profile = string(vol.Profile)
@@ -188,7 +188,7 @@ func listSingleProjectVolumes(projectName string) int {
 
 	// Load config for profiles
 	var cfg *config.StellarioConfig
-	configPath := filepath.Join(projectDir, "stellario.yaml")
+	configPath := findProjectConfig(projectDir)
 	if vres, err := config.LoadAndValidatePath(configPath); err == nil && vres.Config != nil {
 		cfg = vres.Config
 	}
@@ -256,20 +256,91 @@ type volumeStat struct {
 	LastMod   time.Time
 }
 
+// globAllVolumeFiles returns all data .jsonl files under a container, recursing
+// one level into device-id subdirs (device-relative layout) as well as the
+// container itself (legacy flat layout). Generated index files are excluded.
+func globAllVolumeFiles(container string) []string {
+	var files []string
+	seen := map[string]bool{}
+	add := func(fs []string) {
+		for _, f := range fs {
+			base := filepath.Base(f)
+			if base == "volumes.jsonl" ||
+				strings.Contains(base, "keywords-index") || strings.Contains(base, ".index-pending") {
+				continue
+			}
+			if !seen[f] {
+				seen[f] = true
+				files = append(files, f)
+			}
+		}
+	}
+	if fs, err := filepath.Glob(filepath.Join(container, "*.jsonl")); err == nil {
+		add(fs)
+	}
+	if entries, err := os.ReadDir(container); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			if fs, err := filepath.Glob(filepath.Join(container, e.Name(), "*.jsonl")); err == nil {
+				add(fs)
+			}
+		}
+	}
+	return files
+}
+
+// findVolumeFile locates a single volume's .jsonl under a container, checking
+// device subdirs first, then the container itself. Returns "" if not found.
+func findVolumeFile(container, volumeName string) string {
+	if entries, err := os.ReadDir(container); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			cand := filepath.Join(container, e.Name(), volumeName+".jsonl")
+			if _, err := os.Stat(cand); err == nil {
+				return cand
+			}
+		}
+	}
+	cand := filepath.Join(container, volumeName+".jsonl")
+	if _, err := os.Stat(cand); err == nil {
+		return cand
+	}
+	return ""
+}
+
+// findProjectConfig locates stellario.yaml for a project container, checking
+// device subdirs first (device-relative layout), then the container itself.
+func findProjectConfig(container string) string {
+	if entries, err := os.ReadDir(container); err == nil {
+		// prefer the local device's dir if identifiable, else first device dir
+		for _, e := range entries {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			cand := filepath.Join(container, e.Name(), "stellario.yaml")
+			if _, err := os.Stat(cand); err == nil {
+				return cand
+			}
+		}
+	}
+	cand := filepath.Join(container, "stellario.yaml")
+	if _, err := os.Stat(cand); err == nil {
+		return cand
+	}
+	return ""
+}
+
 func listProjectVolumesDetailed(dir string) []volumeStat {
 	var volumes []volumeStat
 
-	files, err := filepath.Glob(filepath.Join(dir, "*.jsonl"))
-	if err != nil {
-		return volumes
-	}
+	files := globAllVolumeFiles(dir)
 
 	for _, file := range files {
 		base := filepath.Base(file)
-		if strings.Contains(base, "keywords-index") || strings.Contains(base, ".index-pending") {
-			continue
-		}
-
 		name := strings.TrimSuffix(base, ".jsonl")
 		entries := readAllEntries(file)
 
@@ -318,9 +389,11 @@ func grepInProject(projectName, volumeFlag, pattern string) int {
 
 	var files []string
 	if volumeFlag != "" {
-		files = []string{filepath.Join(projectDir, volumeFlag+".jsonl")}
+		if f := findVolumeFile(projectDir, volumeFlag); f != "" {
+			files = []string{f}
+		}
 	} else {
-		files, _ = filepath.Glob(filepath.Join(projectDir, "*.jsonl"))
+		files = globAllVolumeFiles(projectDir)
 	}
 
 	matches := 0
