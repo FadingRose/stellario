@@ -181,7 +181,6 @@ func writeTSRuntime(version string) (string, error) {
 	}
 
 	// Generate package.json with exports map.
-	// This is stellario's own file in its own directory — safe to overwrite.
 	pkgJSON := `{
   "name": "stellario",
   "version": "` + version + `",
@@ -213,10 +212,6 @@ func writeTSRuntime(version string) (string, error) {
     "./context": "./src/context.ts",
     "./auto-refs": "./src/auto-refs.ts",
     "./git": "./src/git.ts"
-  },
-  "dependencies": {
-    "yaml": "^2.4.0",
-    "zod": "^3.23.0"
   }
 }
 `
@@ -291,20 +286,44 @@ func writeGlueTools(opencodeDir, tsDir string) (int, error) {
 	return count, nil
 }
 
-// symlinkStellarModule creates node_modules/stellario → ts-runtime symlink.
+// symlinkStellarModule installs stellario's TS runtime directly into opencode's
+// node_modules/stellario/. This is NOT a symlink — files are copied so that
+// Node's upward module resolution naturally finds zod/yaml in the parent
+// node_modules (opencode's dependencies).
 func symlinkStellarModule(opencodeDir, tsDir string) error {
-	modulesDir := filepath.Join(opencodeDir, "node_modules")
-	stellarioLink := filepath.Join(modulesDir, "stellario")
+	targetDir := filepath.Join(opencodeDir, "node_modules", "stellario")
 
 	// Remove existing (symlink or real dir)
-	os.Remove(stellarioLink)
-	os.RemoveAll(stellarioLink)
+	os.Remove(targetDir)
+	os.RemoveAll(targetDir)
 
-	if err := os.MkdirAll(modulesDir, 0755); err != nil {
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
 		return err
 	}
 
-	return os.Symlink(tsDir, stellarioLink)
+	// Copy all files from tsDir to targetDir
+	return filepath.Walk(tsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		rel, err := filepath.Rel(tsDir, path)
+		if err != nil {
+			return err
+		}
+
+		dest := filepath.Join(targetDir, rel)
+
+		if info.IsDir() {
+			return os.MkdirAll(dest, 0755)
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(dest, data, 0644)
+	})
 }
 
 // writeSpecs writes the diagnostic spec files to ~/.stellario/spec/.
