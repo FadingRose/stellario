@@ -24,7 +24,16 @@ type ResolveResult struct {
 
 // RunResolve resolves a project directory to its global library location.
 // Returns JSON on stdout for TS to consume.
+//
+// Special case: if projectRoot is "_global", resolves to the global
+// volumes directory (~/.stellario/global/). This is used by Stellario's
+// own agent to read/write its personal memory (meta volume etc).
 func RunResolve(projectRoot string) int {
+	// Special: _global → global volumes directory
+	if projectRoot == "_global" {
+		return resolveGlobal()
+	}
+
 	name, _, source, err := cluster.ResolveProject(projectRoot)
 	if err != nil {
 		// Fallback: basename
@@ -63,6 +72,55 @@ func RunResolve(projectRoot string) int {
 		return 1
 	}
 
+	fmt.Println(string(data))
+	return 0
+}
+
+// resolveGlobal resolves to the global volumes directory.
+// Stellario's own memory lives here (meta volume with user profile etc).
+func resolveGlobal() int {
+	globalDir := cluster.GlobalVolumesDir()
+	globalConfig := filepath.Join(globalDir, "stellario.yaml")
+
+	// Ensure the global volumes directory exists
+	os.MkdirAll(globalDir, 0755)
+
+	// If no config exists, write a minimal one
+	if _, err := os.Stat(globalConfig); os.IsNotExist(err) {
+		minimalConfig := `# Stellario Global Config
+# This defines volumes for Stellario's own memory (not project-scoped).
+
+volumes:
+  meta:
+    profile: mutable
+    boundaries:
+      write: [stellario]
+      read: [stellario]
+
+agents:
+  stellario:
+    display: "Stellario"
+    role: primary
+`
+		os.WriteFile(globalConfig, []byte(minimalConfig), 0644)
+	}
+
+	starName := ""
+	dev, err := cluster.GetOrCreateDeviceID()
+	if err == nil {
+		starName = dev.Star
+	}
+
+	result := ResolveResult{
+		Project:    "_global",
+		Source:     "global",
+		MemDir:     globalDir,
+		ConfigPath: globalConfig,
+		Exists:     true,
+		Star:       starName,
+	}
+
+	data, _ := json.MarshalIndent(result, "", "  ")
 	fmt.Println(string(data))
 	return 0
 }
