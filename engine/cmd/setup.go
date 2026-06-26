@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 
@@ -47,6 +48,10 @@ func RunSetupWithVersion(version string) int {
 		fmt.Printf("  ✓ Already exists: %s\n", cluster.GlobalDir())
 	}
 
+	// Pull remote changes before star assignment — ensures we see
+	// stars already claimed by other devices.
+	pullRemoteConstellation()
+
 	// Step 2: Star name
 	step++
 	fmt.Printf("\n[%d] Device identity\n", step)
@@ -57,6 +62,8 @@ func RunSetupWithVersion(version string) int {
 	}
 	if dev.Star != "" {
 		fmt.Printf("  ⋆ Star: %s (%s)\n", dev.Star, dev.ID)
+		// Push constellation update so other devices see this star is taken
+		pushConstellationUpdate()
 	} else {
 		fmt.Printf("  ⚠ No star assigned\n")
 	}
@@ -396,3 +403,59 @@ func getShareDir() string {
 // Ensure embedfs is used (prevents unused import if build tags exclude it)
 var _ embed.FS
 var _ = embedfs.Files
+
+// pullRemoteConstellation does a git pull on the global library before
+// star assignment. This ensures the constellation registry is up-to-date
+// with stars claimed by other devices.
+//
+// Silently skips if no remote configured or network unavailable.
+func pullRemoteConstellation() {
+	globalDir := cluster.GlobalDir()
+
+	// Check if remote exists
+	cmd := exec.Command("git", "remote", "get-url", "origin")
+	cmd.Dir = globalDir
+	if err := cmd.Run(); err != nil {
+		return // no remote — first device, nothing to pull
+	}
+
+	// Check if there are any commits (empty repo can't pull)
+	cmd = exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = globalDir
+	if err := cmd.Run(); err != nil {
+		return // no commits yet
+	}
+
+	// Pull with rebase
+	cmd = exec.Command("git", "pull", "--rebase", "origin", "HEAD")
+	cmd.Dir = globalDir
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	_ = cmd.Run() // silent — failures are expected (no remote, network down)
+}
+
+// pushConstellationUpdate commits and pushes the constellation registry
+// after a new star is assigned. This claims the star so other devices
+// won't take it.
+//
+// Silently skips if no remote configured or network unavailable.
+func pushConstellationUpdate() {
+	globalDir := cluster.GlobalDir()
+
+	// Stage constellation
+	cmd := exec.Command("git", "add", ".constellation.json")
+	cmd.Dir = globalDir
+	cmd.Run()
+
+	// Commit (may be no-op if unchanged)
+	cmd = exec.Command("git", "commit", "-m", "constellation: star assignment update")
+	cmd.Dir = globalDir
+	cmd.Run()
+
+	// Push
+	cmd = exec.Command("git", "push", "origin", "HEAD")
+	cmd.Dir = globalDir
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	_ = cmd.Run() // silent
+}
