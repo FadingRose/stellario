@@ -4,47 +4,90 @@ Agent memory infrastructure — structured, permissioned, version-controlled, cr
 
 Agents get memory that survives across sessions. Volumes define how memory behaves (mutable, append-only, scratch, frozen, workspace). Permissions control which agent sees what. Semantic search finds concepts, not just keywords. A global library unifies memory across projects and devices via git. Auto-sync keeps everything up to date.
 
-## Quick Start
+## Install
 
-### For existing projects (opencode integration)
-
-```bash
-cd /path/to/your-project
-npx stellario init --template software
-```
-
-This scaffolds everything inside `.opencode/` — config, tools, agents, plugin, memory directory with its own git repo. Init is idempotent — it skips files that already exist.
-
-Templates: `minimal` · `novel` · `software` · `audit`
-
-### Global library + CLI (Go engine)
+### One-liner (recommended)
 
 ```bash
-# Build and install the Go CLI
-cd engine && go build -o stellario ./cmd/stellario
-cp stellario ~/.local/bin/stellario
-
-# Migrate a project's memory into the global library
-stellario migrate --root /path/to/your-project
-
-# Check cluster health
-stellario doctor --root /path/to/your-project
-stellario status
+curl -fsSL https://raw.githubusercontent.com/FadingRose/stellario/main/install.sh | sh
 ```
 
-### Cross-device sync
+This downloads the binary for your platform, installs it to `~/.local/bin/`, and runs `stellario setup` automatically.
 
-The global library at `~/.stellario/` is a git repo. Set up a remote once:
+### Manual download
+
+Grab the binary from [GitHub Releases](https://github.com/FadingRose/stellario/releases):
+
+| File | Platform |
+|------|----------|
+| `stellario-darwin-arm64` | Apple Silicon Mac |
+| `stellario-darwin-amd64` | Intel Mac |
+| `stellario-linux-amd64` | Linux x86_64 |
+| `stellario-linux-arm64` | Linux ARM |
+
+```bash
+curl -fsSL https://github.com/FadingRose/stellario/releases/latest/download/stellario-darwin-arm64 -o stellario
+chmod +x stellario
+./stellario setup
+```
+
+### Build from source
+
+```bash
+git clone https://github.com/FadingRose/stellario.git
+cd stellario/engine
+make install VERSION=v1.0.0-dev
+```
+
+## Setup
+
+After install, run setup (the installer does this automatically):
+
+```bash
+stellario setup
+```
+
+This will:
+1. Initialize the global library (`~/.stellario/`)
+2. Assign a star name to your device (e.g. Sirius)
+3. Write the TS runtime (memory engine)
+4. Inject the Stellario agent into opencode
+5. Write diagnostic specs
+
+Then open opencode and switch to the **Stellario** agent.
+
+### First conversation
+
+Stellario will ask how you'd like to be called and how you prefer to communicate. She remembers this across sessions.
+
+After that, tell her about a project you're working on — she'll create a project agent for it with its own memory.
+
+## Cross-device sync
+
+The global library at `~/.stellario/` is a single git repo. Set up a remote once:
 
 ```bash
 cd ~/.stellario
 git remote add origin <your-remote.git>
-git push -u origin master
+git push -u origin main
+```
+
+On another device:
+
+```bash
+# Install stellario (same one-liner)
+curl -fsSL https://raw.githubusercontent.com/FadingRose/stellario/main/install.sh | sh
+
+# Clone your memory
+git clone <your-remote.git> ~/.stellario
+
+# Run setup to link this device
+stellario setup
 ```
 
 After that, **sync is automatic**:
-- **Session start**: `git pull --rebase` pulls remote changes (other device's memory)
-- **Every commit**: `git push` pushes to remote immediately after writing
+- **Session start**: pulls remote changes (other device's memory)
+- **Every write**: pushes to remote immediately
 - **Network down**: both operations fail silently — local commits queue up, sync resumes when connectivity returns
 
 ## Architecture
