@@ -5,3 +5,7 @@ dist/
 .opencode/
 engine/stellario
 research/
+embedfs/src/
+embedfs/glue/
+embedfs/templates/
+engine/stellario

@@ -15,6 +15,13 @@ import (
 	"stellario/engine/types"
 )
 
+// Version info injected via ldflags at build time.
+var (
+	Version   = "dev"
+	Commit    = "unknown"
+	BuildDate = "unknown"
+)
+
 // clusterResolveProject wraps cluster.ResolveProject for use in main.
 func clusterResolveProject(dir string) (string, string, string, error) {
 	return cluster.ResolveProject(dir)
@@ -43,6 +50,9 @@ func main() {
 	args := os.Args[2:]
 
 	switch cmd {
+	case "version", "--version", "-v":
+		fmt.Printf("stellario %s (commit: %s, built: %s)\n", Version, Commit, BuildDate)
+		os.Exit(0)
 	case "create":
 		cmdCreate(args)
 	case "show":
@@ -75,6 +85,8 @@ func main() {
 		cmdMemorySync(args)
 	case "volume":
 		cmdVolume(args)
+	case "setup":
+		cmdSetup(args)
 	case "resolve":
 		cmdResolve(args)
 	case "help", "--help", "-h":
@@ -502,6 +514,10 @@ func cmdStatus(args []string) {
 	os.Exit(cmd.RunStatus())
 }
 
+func cmdSetup(args []string) {
+	os.Exit(cmd.RunSetup())
+}
+
 func cmdConfig(args []string) {
 	if len(args) == 0 {
 		fmt.Println("Usage: stellario config <show|validate|edit> [--root <dir>]")
@@ -704,15 +720,16 @@ Graph Operations:
   constellation    Build an arc stream from a bid + hints
 
 Cluster Management:
-  status           Show cluster overview (all projects, volumes, sync state)
-  doctor           Diagnose config + memory integrity (read-only)
-  migrate          Copy memory data into the global library (~/.stellario/)
-  project          Manage project registration (list/register/forget/info/add/remote)
-  config           Show/validate/edit config (--global for global library)
-  volume           List/stats/grep volumes and entries
-  resolve          Resolve a project dir to its global library location (JSON output)
-  memory-sync      Git subtree push/pull per project
-  sync             Sync JSONL files into SQLite (bulk import stale volumes)
+  setup             Initialize stellario (first-time bootstrap)
+  status            Show cluster overview (all projects, volumes, sync state)
+  doctor            Diagnose config + memory integrity (read-only)
+  migrate           Copy memory data into the global library (~/.stellario/)
+  project           Manage project registration (list/register/forget/info/add/remote)
+  config            Show/validate/edit config (--global for global library)
+  volume            List/stats/grep volumes and entries
+  resolve           Resolve a project dir to its global library location (JSON output)
+  memory-sync       Git subtree push/pull per project
+  sync              Sync JSONL files into SQLite (bulk import stale volumes)
 
 Environment:
   STELLARIO_DB       Path to SQLite database (default: ~/.local/share/stellario/stellario.db)`)
