@@ -515,7 +515,7 @@ func cmdStatus(args []string) {
 }
 
 func cmdSetup(args []string) {
-	os.Exit(cmd.RunSetup())
+	os.Exit(cmd.RunSetupWithVersion(Version))
 }
 
 func cmdConfig(args []string) {

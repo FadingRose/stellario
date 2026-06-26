@@ -23,6 +23,11 @@ import (
 // 6. Symlink node_modules/stellario → TS runtime
 // 7. Write spec/ diagnostic rules
 func RunSetup() int {
+	return RunSetupWithVersion("dev")
+}
+
+// RunSetupWithVersion is the real entry point, called from main with ldflags version.
+func RunSetupWithVersion(version string) int {
 	fmt.Println("Stellario Setup")
 	fmt.Println("═══════════════════════════════════════════════════════")
 
@@ -59,7 +64,7 @@ func RunSetup() int {
 	// Step 3: Write TS runtime
 	step++
 	fmt.Printf("\n[%d] TS runtime\n", step)
-	tsDir, err := writeTSRuntime()
+	tsDir, err := writeTSRuntime(version)
 	if err != nil {
 		fmt.Printf("  ✗ Error: %v\n", err)
 		return 1
@@ -135,7 +140,8 @@ func RunSetup() int {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 // writeTSRuntime extracts the embedded TS source to the runtime location.
-func writeTSRuntime() (string, error) {
+// Also generates a package.json with the correct exports map for module resolution.
+func writeTSRuntime(version string) (string, error) {
 	dataDir := getShareDir()
 	tsDir := filepath.Join(dataDir, "ts-runtime")
 
@@ -145,7 +151,6 @@ func writeTSRuntime() (string, error) {
 		return "", fmt.Errorf("create ts-runtime dir: %w", err)
 	}
 
-	count := 0
 	err := fs.WalkDir(embedfs.Files, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -175,7 +180,51 @@ func writeTSRuntime() (string, error) {
 		return "", fmt.Errorf("write TS source: %w", err)
 	}
 
-	_ = count
+	// Generate package.json with exports map.
+	// This is stellario's own file in its own directory — safe to overwrite.
+	pkgJSON := `{
+  "name": "stellario",
+  "version": "` + version + `",
+  "description": "Agent memory infrastructure",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./defs/memory": "./src/defs/memory-defs.ts",
+    "./defs/telescope": "./src/defs/telescope-defs.ts",
+    "./defs/workspace": "./src/defs/workspace-defs.ts",
+    "./defs/coordination": "./src/defs/coordination-defs.ts",
+    "./defs/lsp": "./src/defs/lsp-defs.ts",
+    "./defs/ast-grep": "./src/defs/ast-grep-defs.ts",
+    "./defs/volume-link": "./src/defs/volume-link-defs.ts",
+    "./config": "./src/config.ts",
+    "./store": "./src/store.ts",
+    "./permissions": "./src/permissions.ts",
+    "./types": "./src/types.ts",
+    "./embedding": "./src/embedding.ts",
+    "./coord/types": "./src/coord/types.ts",
+    "./coord/lock": "./src/coord/lock.ts",
+    "./coord/store": "./src/coord/store.ts",
+    "./lsp/types": "./src/lsp/types.ts",
+    "./lsp/client": "./src/lsp/client.ts",
+    "./lsp/manager": "./src/lsp/manager.ts",
+    "./index-worker": "./src/index-worker.ts",
+    "./context": "./src/context.ts",
+    "./auto-refs": "./src/auto-refs.ts",
+    "./git": "./src/git.ts"
+  },
+  "dependencies": {
+    "yaml": "^2.4.0",
+    "zod": "^3.23.0"
+  }
+}
+`
+	pkgPath := filepath.Join(tsDir, "package.json")
+	if err := os.WriteFile(pkgPath, []byte(pkgJSON), 0644); err != nil {
+		return "", fmt.Errorf("write package.json: %w", err)
+	}
+
 	return tsDir, nil
 }
 
