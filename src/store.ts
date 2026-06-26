@@ -10,7 +10,7 @@ import { join } from "path"
 import { z } from "zod"
 import type { StellarioConfig, MemoryEntry, VolumeIndexEntry, MountRef } from "./types.js"
 import { profileBehavior } from "./types.js"
-import { getMemoryDir, getVolumeIdPrefix, getTrackedVolumes } from "./config.js"
+import { getMemoryDir, getVolumeIdPrefix } from "./config.js"
 
 // =============================================================================
 // Text Utilities
@@ -236,11 +236,8 @@ export function writeEntries(
     "utf-8",
   )
 
-  // Regenerate .md for tracked volumes
-  const tracked = getTrackedVolumes(config)
-  if (tracked.includes(volume)) {
-    regenerateMd(memDir, volume, entries)
-  }
+  // .track/ per-entry md is still written for git history
+  // volume aggregate .md is no longer generated (redundant with .track/)
 }
 
 function primaryFileForVolume(memDir: string, volume: string): string {
@@ -454,33 +451,6 @@ function volumeFromId(id: string, config: StellarioConfig): string | null {
     if (volPrefix === prefix) return name
   }
   return null
-}
-
-// =============================================================================
-// Markdown Generation
-// =============================================================================
-
-function regenerateMd(memDir: string, volume: string, entries: MemoryEntry[]): void {
-  const lines: string[] = [`# ${volume}`, ""]
-
-  for (const entry of entries) {
-    lines.push(`## ${entry.id}`)
-    lines.push("")
-    lines.push(entry.content)
-    lines.push("")
-    lines.push(`tags: \`${entry.tags.join(" \u00b7 ")}\``)
-    if (entry.keywords && entry.keywords.length > 0) {
-      lines.push(`keywords: \`${entry.keywords.join(" \u00b7 ")}\``)
-    }
-    if (entry.author) {
-      lines.push(`author: ${entry.author}`)
-    }
-    lines.push("")
-    lines.push("---")
-    lines.push("")
-  }
-
-  writeFileSync(join(memDir, `${volume}.md`), lines.join("\n"), "utf-8")
 }
 
 // =============================================================================

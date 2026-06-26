@@ -3,7 +3,6 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs"
 import { join } from "path"
 import type { StellarioConfig, MemoryEntry } from "./types.js"
 import { profileBehavior } from "./types.js"
-import { getTrackedVolumes } from "./config.js"
 import { readJsonl, formatEntryMdForTrack, ensureTrackVolumeDir } from "./store.js"
 
 /**
@@ -23,7 +22,7 @@ export function gitCommit(
   if (!profileBehavior(def.profile).isTracked) return null
 
   try {
-    const files = [`${volume}.jsonl`, `${volume}.md`]
+    const files = [`${volume}.jsonl`]
     if (entryIds && entryIds.length > 0) {
       for (const id of entryIds) {
         files.push(`.track/${volume}/${id}.md`)
