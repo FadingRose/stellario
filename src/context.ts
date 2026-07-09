@@ -204,6 +204,9 @@ function injectAutoMounts(config: StellarioConfig, siblings: SiblingDevice[] | u
           config.volumes[alias] = {
             profile: "frozen",
             boundaries: { read: ["all"], write: [] },
+            // idPrefix must match the source volume so parseDisplayId
+            // can reconstruct stored IDs correctly (e.g. "a83" not "l83").
+            idPrefix: volname.charAt(0),
           }
         }
       }
