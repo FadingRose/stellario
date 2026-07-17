@@ -143,13 +143,15 @@ export function tryGoResolve(projectRoot: string): GoResolveResult | null {
 /**
  * Resolve the full runtime context from an opencode ToolContext.
  *
- * Path A (Go resolve hit): Data lives in ~/.stellario/projects/{name}/.
- *   Config is loaded from the global library copy.
+ * Path A (Go resolve): Data in ~/.stellario/projects/{name}/{device}/.
+ *   Config from global library. Requires device-relative layout
+ *   (stellario migrate-device).
  *
- * Path B (fallback): Data lives in {projectRoot}/.opencode/memory/.
- *   Config is loaded from .opencode/stellario.yaml.
- *   This is the legacy/project-scoped path, used when Go is unavailable
- *   or the project hasn't been migrated to the global library yet.
+ * Path A failed + project config present → explicit ERROR. No silent local
+ *   fallback — prevents brain split (l341). Usually flat→device-relative
+ *   mismatch; run `stellario migrate-device`.
+ *
+ * Path C (non-project dirs, e.g. guardian agent): global meta volume.
  */
 /**
  * Inject native mounts into config.volumes as frozen/readonly.
@@ -296,35 +298,27 @@ export function resolveContext(ctx: ToolContext): ResolvedContext {
     }
   }
 
-  // ── Path B: Legacy project-scoped fallback ──
-  try {
-    const config = loadConfig(ctx.directory)
-    const memDir = getMemoryDir(config, ctx.directory)
-
-    if (!_trackInitialized) {
-      initGitRepo(memDir)
-      migrateTrackMd(memDir, config)
-      _trackInitialized = true
-    }
-
-    // Inject native mounts (works in legacy mode too)
-    injectMounts(config, memDir)
-    // No siblings in legacy mode — clear any stale auto-mount registry
-    injectAutoMounts(config, [])
-
-    return {
-      config,
-      projectRoot: ctx.directory,
-      memDir,
-      agent: ctx.agent,
-      star: "",
-      projectName: "",
-    }
-  } catch {
-    // No project config found — fall through to Path C
+  // ── Path A failed — NO silent local fallback (prevents brain split, see l341). ──
+  // Project dir (has config but resolve failed) → explicit error.
+  // Non-project dir (guardian/home) → Path C global meta.
+  if (!getGoBinary()) {
+    throw new Error(
+      "Stellario Go binary not found — memory tools unavailable. Reinstall stellario."
+    )
+  }
+  const hasProjectConfig =
+    existsSync(join(ctx.directory, ".opencode", "stellario.yaml")) ||
+    existsSync(join(ctx.directory, "stellario.yaml"))
+  if (hasProjectConfig) {
+    throw new Error(
+      `Project at ${ctx.directory} has a stellario config but Go resolve failed ` +
+      "(exists=false). Usually flat→device-relative layout mismatch.\n" +
+      "Fix: stellario project register (if unregistered) + stellario migrate-device.\n" +
+      "Path B local fallback removed to prevent silent brain split (l341)."
+    )
   }
 
-  // ── Path C: Global meta fallback ──
+  // ── Path C: Global meta fallback (non-project dirs, e.g. guardian agent) ──
   // When no project config is available (e.g. the Stellario guardian agent
   // running outside any project directory), fall back to the global meta
   // volume so memory tools remain accessible.
