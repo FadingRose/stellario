@@ -59,6 +59,18 @@ func main() {
 		cmdShow(args)
 	case "search":
 		cmdSearch(args)
+	case "revise":
+		cmdRevise(args)
+	case "forget":
+		cmdForget(args)
+	case "history":
+		cmdHistory(args)
+	case "meta":
+		cmdMeta(args)
+	case "ref":
+		cmdRef(args)
+	case "unref":
+		cmdUnref(args)
 	case "downstream":
 		cmdDownstream(args)
 	case "propagate":
@@ -121,10 +133,8 @@ func cmdCreate(args []string) {
 	tagsStr := fs.String("tags", "", "comma-separated tags")
 	keywordsStr := fs.String("keywords", "", "comma-separated keywords")
 	author := fs.String("author", "cli", "author")
-	native := fs.Bool("native", false, "use native create with star-suffix ID (for fanout)")
+	_ = fs.Bool("native", false, "deprecated: native JSONL write is now the default")
 	idFlag := fs.String("id", "", "explicit entry ID (fanout mode: use TS's ID)")
-	frameType := fs.String("frame-type", "assert", "frame type")
-	deriveFrom := fs.String("derive-from", "", "comma-separated entry IDs this derives from")
 	fs.Parse(args)
 
 	if *volume == "" || *content == "" {
@@ -132,83 +142,25 @@ func cmdCreate(args []string) {
 		os.Exit(1)
 	}
 
-	// Native create path: star-suffix ID or fanout with provided ID
-	if *native {
-		opts := cmd.CreateOptions{
-			Project:  *project,
-			Volume:   *volume,
-			Content:  *content,
-			Tags:     splitCSV(*tagsStr),
-			Keywords: splitCSV(*keywordsStr),
-			Author:   *author,
-		}
-		if *idFlag != "" {
-			opts.ID = *idFlag
-		}
-		result, err := cmd.RunCreate(opts)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-		mode := "native"
-		if opts.ID != "" {
-			mode = "fanout"
-		}
-		_ = mode
-		fmt.Printf("Created [%s] → %s:%s (%s)\n",
-			result.ID, result.Project, result.Volume, mode)
-		return
+	opts := cmd.CreateOptions{
+		Project:  *project,
+		Volume:   *volume,
+		Content:  *content,
+		Tags:     splitCSV(*tagsStr),
+		Keywords: splitCSV(*keywordsStr),
+		Author:   *author,
 	}
-
-	// Legacy create path (existing behavior)
-	s := getDB()
-	defer s.Close()
-
-	nonce, err := s.NextNonce(*project, *volume)
+	if *idFlag != "" {
+		opts.ID = *idFlag
+	}
+	result, err := cmd.RunCreate(opts)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error generating ID: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-
-	idPrefix := "a"
-	if len(*volume) > 0 {
-		idPrefix = string((*volume)[0])
+	if *idFlag != "" {
+		fmt.Printf("Created [%s] → %s:%s (fanout)\n", result.ID, result.Project, result.Volume)
 	}
-	id := fmt.Sprintf("%s%d", idPrefix, nonce)
-
-	e := types.Entry{
-		ID:        id,
-		Project:   *project,
-		Volume:    *volume,
-		Content:   *content,
-		Tags:      splitCSV(*tagsStr),
-		Keywords:  splitCSV(*keywordsStr),
-		Author:    *author,
-		FrameType: types.FrameType(*frameType),
-	}
-
-	created, err := s.CreateEntry(e)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating entry: %v\n", err)
-		os.Exit(1)
-	}
-
-	if *deriveFrom != "" {
-		for _, target := range splitCSV(*deriveFrom) {
-			if err := s.AddEdge(types.Edge{
-				Source:        id,
-				SourceProject: *project,
-				Target:        target,
-				TargetProject: *project,
-				Type:          types.EdgeDeriveFrom,
-				Reason:        "derive",
-			}); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to add edge to %s: %v\n", target, err)
-			}
-		}
-	}
-
-	printJSON(created)
 }
 
 func cmdShow(args []string) {
@@ -368,6 +320,155 @@ func cmdSupersede(args []string) {
 	}
 
 	fmt.Printf("Marked %s as superseded by %s\n", oldID, newID)
+}
+
+func cmdRevise(args []string) {
+	fs := flag.NewFlagSet("revise", flag.ExitOnError)
+	project := fs.String("project", "_default", "project name")
+	editsStr := fs.String("edits", "", "JSON array of {from,to,content}")
+	tagsStr := fs.String("tags", "", "comma-separated tags (replace existing)")
+	keywordsStr := fs.String("keywords", "", "comma-separated keywords (replace existing)")
+	message := fs.String("message", "", "commit message")
+	agent := fs.String("agent", "", "author agent (default: cli or STELLARIO_AGENT)")
+	fs.Parse(args)
+
+	if fs.NArg() < 1 {
+		fmt.Fprintln(os.Stderr, "Usage: revise --project <proj> --message <text> [--edits <json>] [--tags <tags>] [--keywords <kws>] <id>")
+		os.Exit(1)
+	}
+
+	var edits []cmd.ReviseEdit
+	if *editsStr != "" {
+		if err := json.Unmarshal([]byte(*editsStr), &edits); err != nil {
+			fmt.Fprintf(os.Stderr, "Error parsing edits: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	if err := cmd.RunRevise(cmd.ReviseOptions{
+		Project:  *project,
+		ID:       fs.Arg(0),
+		Edits:    edits,
+		Tags:     splitCSV(*tagsStr),
+		Keywords: splitCSV(*keywordsStr),
+		Message:  *message,
+		Agent:    *agent,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func cmdForget(args []string) {
+	fs := flag.NewFlagSet("forget", flag.ExitOnError)
+	project := fs.String("project", "_default", "project name")
+	agent := fs.String("agent", "", "author agent (default: cli or STELLARIO_AGENT)")
+	fs.Parse(args)
+
+	if fs.NArg() < 1 {
+		fmt.Fprintln(os.Stderr, "Usage: forget --project <proj> <id>")
+		os.Exit(1)
+	}
+
+	if err := cmd.RunForget(cmd.ForgetOptions{
+		Project: *project,
+		ID:      fs.Arg(0),
+		Agent:   *agent,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func cmdHistory(args []string) {
+	fs := flag.NewFlagSet("history", flag.ExitOnError)
+	project := fs.String("project", "_default", "project name")
+	limit := fs.Int("limit", 10, "max revisions")
+	fs.Parse(args)
+
+	if fs.NArg() < 1 {
+		fmt.Fprintln(os.Stderr, "Usage: history --project <proj> [--limit <n>] <id>")
+		os.Exit(1)
+	}
+
+	if err := cmd.RunHistory(cmd.HistoryOptions{
+		Project: *project,
+		ID:      fs.Arg(0),
+		Limit:   *limit,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func cmdMeta(args []string) {
+	fs := flag.NewFlagSet("meta", flag.ExitOnError)
+	project := fs.String("project", "_default", "project name")
+	content := fs.String("content", "", "calibration content")
+	agent := fs.String("agent", "", "author agent (default: cli or STELLARIO_AGENT)")
+	fs.Parse(args)
+
+	if *content == "" {
+		fmt.Fprintln(os.Stderr, "Usage: meta --project <proj> --content <text> [--agent <name>]")
+		os.Exit(1)
+	}
+
+	if err := cmd.RunMeta(cmd.MetaOptions{
+		Project: *project,
+		Content: *content,
+		Agent:   *agent,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func cmdRef(args []string) {
+	fs := flag.NewFlagSet("ref", flag.ExitOnError)
+	project := fs.String("project", "_default", "project name")
+	target := fs.String("target", "", "target entry id")
+	reason := fs.String("reason", "", "reason for link")
+	agent := fs.String("agent", "", "author agent (default: cli or STELLARIO_AGENT)")
+	fs.Parse(args)
+
+	if fs.NArg() < 1 || *target == "" || *reason == "" {
+		fmt.Fprintln(os.Stderr, "Usage: ref --project <proj> --target <id> --reason <text> [--agent <name>] <id>")
+		os.Exit(1)
+	}
+
+	if err := cmd.RunRef(cmd.RefOptions{
+		Project: *project,
+		ID:      fs.Arg(0),
+		Target:  *target,
+		Reason:  *reason,
+		Agent:   *agent,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func cmdUnref(args []string) {
+	fs := flag.NewFlagSet("unref", flag.ExitOnError)
+	project := fs.String("project", "_default", "project name")
+	target := fs.String("target", "", "target entry id")
+	agent := fs.String("agent", "", "author agent (default: cli or STELLARIO_AGENT)")
+	fs.Parse(args)
+
+	if fs.NArg() < 1 || *target == "" {
+		fmt.Fprintln(os.Stderr, "Usage: unref --project <proj> --target <id> [--agent <name>] <id>")
+		os.Exit(1)
+	}
+
+	if err := cmd.RunUnref(cmd.UnrefOptions{
+		Project: *project,
+		ID:      fs.Arg(0),
+		Target:  *target,
+		Agent:   *agent,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func cmdConstellation(args []string) {
@@ -717,6 +818,12 @@ Memory Operations:
   create           Create a new entry
   show             Show an entry with its edges
   search           Search active entries
+  revise           Edit an entry's content/tags/keywords
+  forget           Archive an entry
+  history          Show git revision history for an entry
+  meta             Record a behavioral calibration
+  ref              Create a manual reference between entries
+  unref            Remove a reference between entries
   supersede        Mark an entry as superseded by another
 
 Graph Operations:

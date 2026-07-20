@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "fs"
 import { join } from "path"
 import { execFileSync } from "child_process"
+import { homedir } from "os"
 import type { StellarioConfig, ToolContext, VolumeDef } from "./types.js"
 import { loadConfig, loadConfigFromPath, getMemoryDir } from "./config.js"
 import { initGitRepo, migrateTrackMd } from "./git.js"
@@ -204,12 +205,68 @@ function injectAutoMounts(config: StellarioConfig, siblings: SiblingDevice[] | u
           config.volumes[alias] = {
             profile: "frozen",
             boundaries: { read: ["all"], write: [] },
+            // idPrefix must match the source volume so parseDisplayId
+            // can reconstruct stored IDs correctly (e.g. "a83" not "l83").
+            idPrefix: volname.charAt(0),
           }
         }
       }
     }
   }
   setAutoMounts(autoMounts)
+}
+
+/**
+ * Read the device star name from ~/.stellario/.constellation.json.
+ * Used by the global meta fallback when Go resolve is unavailable.
+ */
+function readGlobalStar(): string {
+  try {
+    const constPath = join(homedir(), ".stellario", ".constellation.json")
+    if (existsSync(constPath)) {
+      const data = JSON.parse(readFileSync(constPath, "utf-8"))
+      const stars = Object.keys(data.stars || {})
+      return stars[0] || ""
+    }
+  } catch { /* ignore */ }
+  return ""
+}
+
+/**
+ * Path C fallback: resolve to the global meta volume.
+ *
+ * When no project config is available (e.g. the Stellario guardian agent
+ * running from the home directory), fall back to the global meta volume so
+ * that memory tools remain accessible. Returns null if the global config
+ * does not exist.
+ */
+function tryGlobalMetaFallback(ctx: ToolContext): ResolvedContext | null {
+  try {
+    const globalDir = join(homedir(), ".stellario", "global")
+    const globalConfigPath = join(globalDir, "stellario.yaml")
+    if (!existsSync(globalConfigPath)) return null
+
+    const config = loadConfigFromPath(globalConfigPath)
+
+    if (!_trackInitialized) {
+      initGitRepo(globalDir)
+      _trackInitialized = true
+    }
+
+    injectMounts(config, globalDir)
+    injectAutoMounts(config, [])
+
+    return {
+      config,
+      projectRoot: ctx.directory,
+      memDir: globalDir,
+      agent: ctx.agent,
+      star: readGlobalStar(),
+      projectName: "_global",
+    }
+  } catch {
+    return null
+  }
 }
 
 export function resolveContext(ctx: ToolContext): ResolvedContext {
@@ -239,29 +296,32 @@ export function resolveContext(ctx: ToolContext): ResolvedContext {
     }
   }
 
-  // ── Path B: Legacy project-scoped fallback ──
-  const config = loadConfig(ctx.directory)
-  const memDir = getMemoryDir(config, ctx.directory)
-
-  if (!_trackInitialized) {
-    initGitRepo(memDir)
-    migrateTrackMd(memDir, config)
-    _trackInitialized = true
+  // ── Path A failed — NO silent local fallback (prevents brain split, see l341). ──
+  if (!getGoBinary()) {
+    throw new Error("Stellario Go binary not found — memory tools unavailable. Reinstall stellario.")
+  }
+  const hasProjectConfig =
+    existsSync(join(ctx.directory, ".opencode", "stellario.yaml")) ||
+    existsSync(join(ctx.directory, "stellario.yaml"))
+  if (hasProjectConfig) {
+    throw new Error(
+      `Project at ${ctx.directory} not connected to global library (resolve exists=false).\n` +
+      "Fix: stellario project register (if unregistered) + stellario migrate-device.\n" +
+      "Path B local fallback removed to prevent silent brain split (l341)."
+    )
   }
 
-  // Inject native mounts (works in legacy mode too)
-  injectMounts(config, memDir)
-  // No siblings in legacy mode — clear any stale auto-mount registry
-  injectAutoMounts(config, [])
+  // ── Path C: Global meta fallback (non-project dirs) ──
+  // When no project config is available (e.g. the Stellario guardian agent
+  // running outside any project directory), fall back to the global meta
+  // volume so memory tools remain accessible.
+  const globalCtx = tryGlobalMetaFallback(ctx)
+  if (globalCtx) return globalCtx
 
-  return {
-    config,
-    projectRoot: ctx.directory,
-    memDir,
-    agent: ctx.agent,
-    star: "",
-    projectName: "",
-  }
+  // All paths failed — surface the original error
+  throw new Error(
+    "Stellario config not found. Create .opencode/stellario.yaml or stellario.yaml in your project root."
+  )
 }
 
 // =============================================================================

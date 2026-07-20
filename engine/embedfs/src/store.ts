@@ -413,8 +413,13 @@ export function parseDisplayId(
   const def = config.volumes[volume]
   if (!def) return null
 
-  const prefix = def.idPrefix || volume.charAt(0)
-  return { volume, storedId: `${prefix}${num}` }
+  // Return the number portion (after the colon) as storedId.
+  // Callers match via stripStarSuffix(e.id).slice(1) to stay symmetric with
+  // formatDisplayId, which generates the number by slicing the first char of
+  // the stored id. This avoids depending on config.idPrefix, which may differ
+  // from the entry's actual prefix in linked/mounted volumes (e.g. a lilac
+  // entry "a83" mounted as "lilac-active" with config idPrefix "la").
+  return { volume, storedId: num }
 }
 
 // =============================================================================
@@ -440,11 +445,14 @@ export function findEntry(
     if (!parsed) return null
     const { volume, storedId } = parsed
     const entries = readJsonl(memDir, volume)
-    const found = entries.find((e) => idMatch(e.id, storedId))
+    // Match by number suffix (strip first char + star suffix) to stay symmetric
+    // with formatDisplayId. This correctly handles multi-char idPrefix volumes
+    // where the entry's stored id retains the source prefix.
+    const found = entries.find((e) => stripStarSuffix(e.id).slice(1) === storedId)
     if (found) return { entry: found, volume }
     // Also check archived (entry may have been forgotten)
     const archived = readJsonl(memDir, "archived")
-    const archivedFound = archived.find((e) => idMatch(e.id, storedId))
+    const archivedFound = archived.find((e) => stripStarSuffix(e.id).slice(1) === storedId)
     if (archivedFound) return { entry: archivedFound, volume: "archived" }
     return null
   }

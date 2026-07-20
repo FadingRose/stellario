@@ -6,7 +6,7 @@ import {
   readJsonl, writeEntries, generateNextId, findEntry,
   today, truncate, extractTitle, dedupeTags, ensureStringArray, ensureArray,
   writeEntryMd, removeEntryMd, getEntryMdPath,
-  formatDisplayId, toDisplayId, parseDisplayId,
+  formatDisplayId, toDisplayId,
 } from "../store.js"
 import { gitCommit, gitLogEntry } from "../git.js"
 import {
@@ -691,8 +691,8 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       const source = entries.find(e => e.id === sourceFound.entry.id)
       if (!source) return `❌ Source entry "${sourceFound.entry.id}" not found in ${volume}.`
 
-      // Already linked? (match both display and short format)
-      const targetStored = parseDisplayId(args.target, ctx.config)?.storedId ?? args.target
+      // Already linked? (match both display and stored id)
+      const targetStored = targetFound.entry.id
       if (source.refs?.some(r => r.target === args.target || r.target === targetStored)) {
         return `\u274c [${args.id}] is already linked to [${args.target}].`
       }
@@ -757,8 +757,9 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       const source = entries.find(e => e.id === sourceFound.entry.id)
       if (!source) return `❌ Source entry "${sourceFound.entry.id}" not found in ${volume}.`
 
-      // Match ref target in both display and short format
-      const targetStored = parseDisplayId(args.target, ctx.config)?.storedId ?? args.target
+      // Match ref target in both display and stored id
+      const unrefTargetFound = findEntry(ctx.memDir, args.target, ctx.config)
+      const targetStored = unrefTargetFound?.entry.id ?? args.target
       const refIdx = source.refs?.findIndex(r => r.target === args.target || r.target === targetStored) ?? -1
       if (refIdx === -1) {
         // Already unref'd — check refs_removed
@@ -778,8 +779,9 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         source.refs_removed.push(args.target)
 
         // Remove reverse auto ref from target (CL-10)
-        // ref.target may be displayId or short format — find target entry
-        const targetEntryId = parseDisplayId(ref.target, ctx.config)?.storedId ?? ref.target
+        // ref.target may be displayId or stored id — find target entry
+        const refTargetFound = findEntry(ctx.memDir, ref.target, ctx.config)
+        const targetEntryId = refTargetFound?.entry.id ?? ref.target
         const target = entries.find(e => e.id === targetEntryId)
         if (target?.refs) {
           target.refs = target.refs.filter(
