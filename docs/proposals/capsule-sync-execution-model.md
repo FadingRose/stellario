@@ -391,13 +391,13 @@ field directly for brain-split detection, head computation, and merge
 construction. It is the only authoritative source of causal structure.
 
 **Operation enum** is `create | revise | merge | tombstone | policy`. Tag
-mutations (`add_tag`, `remove_tag`) and reference mutations (`add_ref`,
-`remove_ref`) are encoded inside `revise` payloads rather than as separate
-operation values. The convergence rules in Cross-Device Revision Behavior
-are applied at the payload level: two `revise` revisions whose payloads
-add disjoint tags to the same entry auto-converge at view-build time; two
-`revise` revisions whose payloads conflict (one adds a tag, another removes
-the same tag) require an explicit merge revision.
+additions and removals, and reference additions and removals, are encoded
+inside `revise` payloads rather than as separate operation values. The
+convergence rules in Cross-Device Revision Behavior are applied at the
+payload level: two `revise` revisions whose payloads add disjoint tags to
+the same entry auto-converge at view-build time; two `revise` revisions
+whose payloads conflict (one adds a tag, another removes the same tag)
+require an explicit merge revision.
 
 **`observed_frontier` is omitted from V1.** Earlier drafts carried a per-device
 frontier vector (`{ dev_a: 101, dev_b: 34 }`) as causal metadata. With semantic
@@ -759,8 +759,8 @@ apply fetched revisions to the event set
 ```
 
 A tool already using generation N may finish against that generation. A later
-tool sees generation N+1. The view is a cache and can be rebuilt from a snapshot
-plus later revisions.
+tool sees generation N+1. The view is a cache and can be rebuilt from the
+full observed event set.
 
 V1 storage for the materialized view is a local SQLite database in WAL mode,
 gitignored and rebuildable from revision files. SQLite provides atomic
@@ -794,8 +794,8 @@ snapshot_id: checkpoint_20
 observed_event_set_summary:
   devices_present: [dev_a, dev_b]
   revision_count: 1220
-semantic_heads: {}
-materialized_entries: {}
+# semantic_heads and materialized_entries are derived at load time
+# from the event set; they are not stored authoritatively in the snapshot.
 ```
 
 Note: V1 has no `frontier` vector in the revision envelope (see Revision
@@ -1002,7 +1002,8 @@ Still open:
 4. What caller-stable idempotency key scheme (if any) is required for
    exactly-once tool semantics, or is at-least-once permanently accepted?
 5. What snapshot format and verification rules are required?
-6. When may an offline or lost device be excluded from an epoch frontier?
+6. When may an offline or lost device be excluded from an epoch's participant
+   set?
 7. How are archived epochs discovered and retrieved for history queries?
 8. What is the on-disk shape of the SQLite materialized view, and how is it
    rebuilt on demand from revision files?
