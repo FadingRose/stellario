@@ -14,6 +14,7 @@ import { z } from "zod"
 import { existsSync, readFileSync, readdirSync } from "fs"
 import { join } from "path"
 import { homedir } from "os"
+import { execFileSync } from "child_process"
 import { parse as parseYaml } from "yaml"
 import type { ToolContext, ToolDef, StellarioConfig, MountRef } from "../types.js"
 import { resolveContext } from "../context.js"
@@ -30,9 +31,8 @@ import { readMounts, addMount, removeMount } from "../store.js"
  */
 function commitVolumeIndex(memDir: string, message: string): void {
   try {
-    const { execSync } = require("child_process")
-    execSync("git add volumes.jsonl", { cwd: memDir, stdio: "pipe" })
-    execSync(`git commit -m ${JSON.stringify(message)}`, { cwd: memDir, stdio: "pipe" })
+    execFileSync("git", ["add", "--", "volumes.jsonl"], { cwd: memDir, stdio: "pipe" })
+    execFileSync("git", ["commit", "-m", message], { cwd: memDir, stdio: "pipe" })
   } catch {
     // best effort — may fail if nothing changed or git not configured
   }

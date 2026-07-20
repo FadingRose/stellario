@@ -5,7 +5,7 @@
 // No state, no process management — each call is a fresh CLI invocation.
 
 import { z } from "zod"
-import { execSync } from "child_process"
+import { execFileSync } from "child_process"
 import type { ToolContext, ToolDef } from "../types.js"
 import { resolveContext } from "../context.js"
 import { resolveAgent } from "../permissions.js"
@@ -42,7 +42,7 @@ export function getAstGrepToolDefs(): Record<string, ToolDef> {
 
       // Check ast-grep availability
       try {
-        execSync("which ast-grep", { stdio: "pipe" })
+        execFileSync("which", ["ast-grep"], { stdio: "pipe" })
       } catch {
         return "\u274c ast-grep not found. Install with: npm install -g @ast-grep/cli or cargo install ast-grep"
       }
@@ -51,29 +51,19 @@ export function getAstGrepToolDefs(): Record<string, ToolDef> {
         return "\u274c pattern is required."
       }
 
-      // Build command
       const searchPath = args.path || ctx.projectRoot
       const limit = args.limit || 50
 
-      const cmdParts = ["ast-grep", "run"]
-      cmdParts.push("-p", args.pattern)
+      const cmdArgs = ["run", "-p", args.pattern]
 
       if (args.language) {
-        cmdParts.push("-l", args.language)
+        cmdArgs.push("-l", args.language)
       }
 
-      cmdParts.push(searchPath)
-
-      const cmd = cmdParts.map(part => {
-        // Escape parts that might contain spaces or special chars
-        if (/[\s'"$`\\!]/.test(part)) {
-          return `'${part.replace(/'/g, "'\\''")}'`
-        }
-        return part
-      }).join(" ")
+      cmdArgs.push(searchPath)
 
       try {
-        const output = execSync(cmd, {
+        const output = execFileSync("ast-grep", cmdArgs, {
           cwd: ctx.projectRoot,
           stdio: ["pipe", "pipe", "pipe"],
           timeout: 30000,

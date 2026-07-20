@@ -241,7 +241,7 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
       // If Go is unavailable, the fanout is silently skipped (non-blocking).
       try {
         const projectName = resolveProjectName(ctx.projectRoot)
-        const { execSync } = await import("child_process")
+        const { execFileSync } = await import("child_process")
         const goArgs = [
           "create", "--native",
           "--id", id,
@@ -252,7 +252,7 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
         ]
         if (tags.length > 0) goArgs.push("--tags", tags.join(","))
         if (keywords.length > 0) goArgs.push("--keywords", keywords.join(","))
-        execSync(`stellario ${goArgs.map(a => `"${a}"`).join(" ")}`, {
+        execFileSync("stellario", goArgs, {
           stdio: "pipe",
           timeout: 5000,
         })

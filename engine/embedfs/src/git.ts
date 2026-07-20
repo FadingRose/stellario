@@ -1,4 +1,4 @@
-import { execSync } from "child_process"
+import { execFileSync } from "child_process"
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs"
 import { join } from "path"
 import type { StellarioConfig, MemoryEntry } from "./types.js"
@@ -29,9 +29,9 @@ export function gitCommit(
       }
     }
     // -A handles add/modify/delete for per-entry md files (forget removes them)
-    execSync(`git add -A ${files.join(" ")}`, { cwd: memDir, stdio: "pipe" })
-    execSync(`git commit -m ${JSON.stringify(message)}`, { cwd: memDir, stdio: "pipe" })
-    const hash = execSync("git rev-parse --short HEAD", { cwd: memDir }).toString().trim()
+    execFileSync("git", ["add", "-A", "--", ...files], { cwd: memDir, stdio: "pipe" })
+    execFileSync("git", ["commit", "-m", message], { cwd: memDir, stdio: "pipe" })
+    const hash = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: memDir }).toString().trim()
 
     // Fire-and-forget push — tolerates network partition
     gitPush(memDir)
@@ -47,7 +47,7 @@ export function gitCommit(
  */
 export function isGitRepo(memDir: string): boolean {
   try {
-    execSync("git rev-parse --git-dir", { cwd: memDir, stdio: "pipe" })
+    execFileSync("git", ["rev-parse", "--git-dir"], { cwd: memDir, stdio: "pipe" })
     return true
   } catch {
     return false
@@ -60,7 +60,7 @@ export function isGitRepo(memDir: string): boolean {
 export function initGitRepo(memDir: string): boolean {
   if (isGitRepo(memDir)) return false
   try {
-    execSync("git init", { cwd: memDir, stdio: "pipe" })
+    execFileSync("git", ["init"], { cwd: memDir, stdio: "pipe" })
     return true
   } catch {
     return false
@@ -122,9 +122,10 @@ export function migrateTrackMd(
   // Initial git commit for migrated files
   if (count > 0 && isGitRepo(memDir)) {
     try {
-      execSync(`git add .track/`, { cwd: memDir, stdio: "pipe" })
-      execSync(
-        `git commit -m "migrate: initial per-entry md tracking (${count} entries)"`,
+      execFileSync("git", ["add", "--", ".track/"], { cwd: memDir, stdio: "pipe" })
+      execFileSync(
+        "git",
+        ["commit", "-m", `migrate: initial per-entry md tracking (${count} entries)`],
         { cwd: memDir, stdio: "pipe" },
       )
     } catch {
@@ -148,8 +149,9 @@ export function gitLogEntry(
 
   try {
     const path = `.track/${volume}/${id}.md`
-    const log = execSync(
-      `git log --oneline -${limit} -- ${path}`,
+    const log = execFileSync(
+      "git",
+      ["log", "--oneline", `-${limit}`, "--", path],
       { cwd: memDir, stdio: "pipe" },
     ).toString().trim()
     return log || null
@@ -173,7 +175,7 @@ export function gitLogEntry(
  */
 export function gitPush(memDir: string): void {
   try {
-    execSync("git push origin HEAD 2>&1", { cwd: memDir, stdio: "pipe", timeout: 10000 })
+    execFileSync("git", ["push", "origin", "HEAD"], { cwd: memDir, stdio: "pipe", timeout: 10000 })
   } catch {
     // Network partition, no remote, or auth failure — silent
   }
@@ -185,7 +187,7 @@ export function gitPush(memDir: string): void {
  */
 export function gitPull(memDir: string): void {
   try {
-    execSync("git pull --rebase origin HEAD 2>&1", { cwd: memDir, stdio: "pipe", timeout: 10000 })
+    execFileSync("git", ["pull", "--rebase", "origin", "HEAD"], { cwd: memDir, stdio: "pipe", timeout: 10000 })
   } catch {
     // Network partition, no remote, or conflict — silent
   }

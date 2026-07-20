@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from "fs"
 import { join } from "path"
-import { execSync } from "child_process"
+import { execFileSync } from "child_process"
 import type { StellarioConfig, ToolContext, VolumeDef } from "./types.js"
 import { loadConfig, loadConfigFromPath, getMemoryDir } from "./config.js"
 import { initGitRepo, migrateTrackMd } from "./git.js"
@@ -68,10 +68,10 @@ function findGoBinary(): string | null {
 
   // 2. In PATH — verify it actually handles 'resolve' (not the Node CLI)
   try {
-    const which = execSync("which stellario", { stdio: "pipe", timeout: 1000 }).toString().trim()
+    const which = execFileSync("which", ["stellario"], { stdio: "pipe", timeout: 1000 }).toString().trim()
     if (which) {
       try {
-        execSync(`"${which}" resolve --help`, { stdio: "pipe", timeout: 2000 })
+        execFileSync(which, ["resolve", "--help"], { stdio: "pipe", timeout: 2000 })
         return which  // confirmed Go binary
       } catch {
         // 'stellario' in PATH doesn't support resolve — skip to dev mode
@@ -117,8 +117,9 @@ export function tryGoResolve(projectRoot: string): GoResolveResult | null {
   }
 
   try {
-    const output = execSync(
-      `"${goBin}" resolve --root "${projectRoot}"`,
+    const output = execFileSync(
+      goBin,
+      ["resolve", "--root", projectRoot],
       { stdio: "pipe", timeout: 5000, encoding: "utf-8" },
     )
     const result = JSON.parse(output) as GoResolveResult
