@@ -1,6 +1,6 @@
 # Proposal: Isolated Memory Capsules and Git Dump Pipeline
 
-Status: Revised draft (distributed-systems framing)
+Status: Revised draft (post-review-3 cleanup)
 
 This document records the current design proposal for project identity, memory
 isolation, local execution, cross-device revisions, and Git-based transport. It
@@ -9,7 +9,7 @@ compatibility commitment should be inferred from this proposal.
 
 ### Revision notes
 
-This proposal has been through two principal reframings.
+This proposal has been through two principal reframings and one cleanup pass.
 
 **Reframe 1 — Trust model.** The capsule's trust boundary is fixed at remote
 push access; the protocol no longer claims actor-level permissions, device
@@ -43,6 +43,36 @@ Security-defensive depth (signature, device enrollment, authenticated
 authority, malicious-remote validation, quarantine) remains a legitimate
 concern for future versions that widen the trust boundary. It is documented
 as a non-goal for V1, not denied.
+
+**Cleanup pass (review 3).** Review 3 found the two reframings sound but
+flagged 14 internal-consistency issues: stale terminology (`frontier`
+overloaded, `materialized view` defined via snapshots V1 does not have), a
+layout diagram that did not match the body, an undefined `capsule.json`
+ownership model, a redundant `local/` directory mention, sync-vs-write lock
+ambiguity (V1 actually has one SQLite lock, not two), redundancy in the
+sync flow's capture step, an imprecise crash-recovery description, a
+snapshots section presented as V1 content despite being V2, an undefined
+divergence-surfacing mechanism, a Non-Goals/Materialized-Views tension
+about SQLite, a missing operation-enum story for tag/ref mutations, and an
+underspecified "personal-memory special capsule."
+
+This revision applies all 14 cleanup items. The protocol shape is
+unchanged; the document is now internally consistent. Key decisions made
+during cleanup:
+
+- V1 has **one local lock** (SQLite WAL); sync holds it across fetch +
+  rebase + view rebuild and releases it only for push.
+- The materialized view exposes a **`divergent_heads` query** plus a
+  session-start count, making the "divergence is observable" guarantee
+  concrete.
+- **`capsule.json` is immutable identity metadata**; mutable derived state
+  lives in gitignored `local/`.
+- **Snapshots and Compaction is explicitly labeled V2** and moved out of
+  the V1 mental model.
+- **Tag/ref mutations live inside `revise` payloads**; convergence rules
+  apply at the payload level.
+- **Personal-memory stays a project-local volume in V1**; multi-capsule
+  interactions are deferred.
 
 ## Review Goal
 
@@ -146,7 +176,10 @@ V1 trust model, not as replacements for it.
 
 **Capsule**
 : The isolated local directory, Git repository, policy, and revision history
-  for one project. Global personal memory is a special capsule.
+  for one project. The user's global personal memory is, in current
+  implementation, a project-local volume rather than a separate capsule;
+  multi-capsule interactions (mounts, cross-capsule references) are out of
+  scope for V1 protocol work.
 
 **Replica**
 : Revisions produced by one device inside a capsule.
@@ -155,7 +188,10 @@ V1 trust model, not as replacements for it.
 : An immutable create, revise, merge, tombstone, reference, or policy event.
 
 **Materialized view**
-: A rebuildable current view derived from a snapshot plus later revisions.
+: A rebuildable current view derived from the locally observed event set. In
+  V1 the view is backed by a local SQLite database (see Materialized Views);
+  snapshots are an optional V2 acceleration structure and are not required
+  to define or rebuild the view.
 
 **Transport frontier**
 : The revisions known to be committed or replicated through Git.
@@ -170,15 +206,21 @@ Git repository:
 
 ```text
 ~/.stellario/
-|-- registry.json              # local project/path bindings
-|-- devices.json               # local device information
-|-- cache/                     # rebuildable cross-project indexes
+|-- .project-map.json          # local attachment records (binding: directory ↔ capsule)
+|-- .device-id                 # local device identifier (self-asserted, gitignored)
+|-- .stars.json                # device → human-readable star name (gitignored)
+|-- cache/                     # rebuildable cross-project indexes (gitignored)
 |-- global/
-|   `-- personal-memory/       # independent capsule and Git repository
+|   `-- personal-memory/       # project-local volume in V1; separate capsule deferred to V2
 `-- projects/
-    |-- <project-id>/          # independent capsule and Git repository
+    |-- <project-id>/          # one capsule per project: own Git repo, optional remote
     `-- <project-id>/
 ```
+
+Files prefixed with `.` and the `cache/` directory are device-local and
+gitignored; they are not replicated. Only the per-capsule Git repositories
+under `projects/` and `global/` are synced, and each one syncs only to its
+own remote.
 
 Each project capsule has its own repository and optional remote. Repository
 access is therefore also the project memory access boundary. A project remote
@@ -276,15 +318,33 @@ The exact file format is not frozen. The logical ownership model is:
 ```text
 <capsule>/
 |-- .git/
-|-- capsule.json
+|-- capsule.json               # immutable: schema version + capsule ID
 |-- replicas/
 |   |-- <device-a>/
 |   |   `-- revisions/
 |   `-- <device-b>/
 |       `-- revisions/
-|-- snapshots/
-`-- local/                    # ignored runtime state, if stored here
+|-- snapshots/                 # V2: not present in V1
+`-- local/                     # device-local runtime state (gitignored)
+    |-- <device-id>/
+    |   |-- materialized.db    # SQLite materialized view
+    |   `-- transport-pending  # derivative marker, rebuilt on recovery
+    `-- ...
 ```
+
+**`capsule.json`** is immutable identity and schema metadata. It contains
+the capsule ID and the schema version. It does not contain policy, derived
+state, or anything that changes after capsule creation. If the schema or
+identity need to evolve, that evolution is expressed as a new capsule
+(migration) rather than as a mutation of `capsule.json`. Mutating this file
+on one device and pushing it would silently fork the capsule's identity,
+which is exactly the failure mode immutable metadata prevents.
+
+**`local/`** is a gitignored directory holding device-local runtime state
+that does not sync. In V1 it contains one subdirectory per device that has
+written to this capsule, holding that device's SQLite materialized view and
+any derivative markers. The transport-pending marker is rebuilt on recovery
+by scanning revision files; it is never itself authoritative.
 
 Each device writes only its own replica path. Revisions are immutable and have
 globally unique IDs. Mutable shared files should be avoided because they turn a
@@ -330,6 +390,15 @@ stored authoritatively.
 field directly for brain-split detection, head computation, and merge
 construction. It is the only authoritative source of causal structure.
 
+**Operation enum** is `create | revise | merge | tombstone | policy`. Tag
+mutations (`add_tag`, `remove_tag`) and reference mutations (`add_ref`,
+`remove_ref`) are encoded inside `revise` payloads rather than as separate
+operation values. The convergence rules in Cross-Device Revision Behavior
+are applied at the payload level: two `revise` revisions whose payloads
+add disjoint tags to the same entry auto-converge at view-build time; two
+`revise` revisions whose payloads conflict (one adds a tag, another removes
+the same tag) require an explicit merge revision.
+
 **`observed_frontier` is omitted from V1.** Earlier drafts carried a per-device
 frontier vector (`{ dev_a: 101, dev_b: 34 }`) as causal metadata. With semantic
 state derived from the observed DAG (see Independent State Machines), the
@@ -354,14 +423,14 @@ replication. Local durability means the revision file is on disk and survives
 a crash that occurs after acknowledgement.
 
 ```text
-acquire capsule write lock (see below)
+acquire the SQLite write lock (see Local write lock below)
 -> validate against one materialized generation
 -> write revision content to a temporary file in the replica directory
 -> fsync the temporary file
 -> atomic rename to the final revision path
 -> fsync the replica directory
 -> record transport pending
--> publish the next materialized generation
+-> publish the next materialized generation (commit the SQLite transaction)
 -> release lock
 -> return success
 ```
@@ -390,9 +459,12 @@ transaction that publishes the next generation. No custom lock file is
 defined.
 
 The lock is held only across local disk operations. Network operations
-(fetch, push) capture an immutable batch of revisions under the lock, release
-it, perform network I/O, then reacquire the lock and reconcile from the
-latest local and remote state. The lock is never held across network I/O.
+(push) release the lock for the duration of the network I/O and reacquire
+it before reconciling post-push state. The lock is never held across the
+push itself. Fetch and rebase, although they involve the network, do not
+release the lock: their result (the post-fetch event set) must be reconciled
+with the materialized view atomically, before any new local write is
+acknowledged against the post-fetch generation.
 
 Multiple sessions on the same device share the lock. Device-owned replica
 paths prevent cross-device Git file conflicts but do not, by themselves,
@@ -406,31 +478,43 @@ job here is to converge with the remote despite network partition, message
 duplication, non-deterministic push ordering, and concurrent pushes by other
 devices — not to defend against a malicious remote.
 
+V1 has a single local lock: the SQLite write lock that also serializes local
+writes (see Local Write Execution). There is no separate sync lock. The
+consequence is that local writes are blocked while sync holds the lock, but
+sync holds the lock for the minimum time required for atomic reconciliation
+and releases it for the slow network operation (push).
+
 One sync worker operates on one capsule at a time:
 
 ```text
-capture an immutable batch of locally durable but uncommitted revisions
-  (under the local write lock)
-release the local write lock
-acquire the capsule sync lock (mutually exclusive with other sync workers
-  on this device, not with the local write lock)
-recover any locally durable but uncommitted revisions added since the
-  snapshot above
-commit the batch into the device-owned replica path
+acquire the SQLite write lock
+scan the replica directory for locally durable but uncommitted revisions
+commit the scanned revisions into the device-owned replica path (Git)
 fetch the capsule remote
+  (network I/O, but does not release the lock)
 rebase the device-owned commits onto the fetched branch
+  (file conflicts should not occur; each device writes its own replica path)
+apply the fetched revisions to the local event set
+rebuild the materialized generation from the full observed event set
+release the SQLite write lock
 push with non-fast-forward retry
-reacquire the local write lock
-rebuild a new materialized generation from the full observed event set
+  (network I/O; the lock is not held)
+if push was rejected as non-fast-forward:
+  loop back to "acquire the SQLite write lock" and retry
 publish transport frontier and sync status
-release both locks
 ```
 
-The lock ordering — capture-then-release, never holding across network I/O —
-is what allows local writes to remain acknowledged while sync is in flight.
-A writer that arrives during sync obtains the write lock against the
-currently published generation; its revision is queued for the next sync
-batch rather than blocking on this one.
+The critical property is that **fetch, rebase, event-set update, and view
+rebuild happen atomically under the lock**. A local writer that obtains the
+lock after sync releases it sees a post-fetch materialized generation; it
+never validates against a pre-fetch generation while the post-fetch event
+set is partially applied. This is what makes sync's effect on the view
+indivisible from the perspective of local writers.
+
+Push is the only step that releases the lock. If push is rejected as
+non-fast-forward, sync loops back, reacquires the lock, fetches the now-
+advanced remote, and reconciles. The reconciliation is idempotent (see
+below), so retrying after a successful-but-unconfirmed push has no effect.
 
 ### Idempotent delivery
 
@@ -510,11 +594,12 @@ Two reasons it cannot be persisted:
 2. **Two concurrent merges may themselves diverge.** The merge "state" is just
    another revision in the DAG and must obey the same derivation rule.
 
-Derived terminology is relative to the observed frontier:
+Derived terminology is relative to the locally observed event set:
 
-- a head is **locally non-divergent at frontier F** if the locally observed
-  DAG has exactly one head for that entry at F;
-- a head is **locally divergent at frontier F** if there are two or more.
+- a head is **locally non-divergent at observed event set E** if E, applied
+  to the entry's revision DAG, leaves exactly one head for that entry;
+- a head is **locally divergent at observed event set E** if E leaves two or
+  more.
 
 The terms "clean" and "divergent" may appear in user-facing output as
 shorthand, but the protocol never persists them and never treats them as
@@ -572,7 +657,7 @@ collapse divergent heads. V1 requires merge revisions for:
 A merge revision is a revision whose `parents` field lists all the divergent
 heads of an entry and whose payload describes the merged result. After the
 merge revision is delivered, the entry has a single head again at every
-frontier that observes the merge.
+observed event set that includes the merge.
 
 A merge revision may itself diverge from another merge revision (two devices
 produce merges of the same pair concurrently). This is normal and is handled
@@ -600,6 +685,15 @@ A volume in `proposal-only` or `frozen` mode keeps its revisions as
 candidates that do not appear in the default materialized view until accepted.
 Candidate state is derived from policy at view-build time, not persisted as
 a per-revision flag.
+
+### Surfacing divergence
+
+The materialized view exposes a `divergent_heads` query that returns every
+entry currently with more than one observed head, along with the head
+revision IDs. Session-start context injection includes the count of
+divergent entries and a brief pointer (volume, entry ID) for each. A tool
+or user may then produce a merge revision explicitly. Auto-merge of
+non-commutative operations is out of scope for V1.
 
 ## Project Policy and Device Configuration
 
@@ -639,12 +733,12 @@ unusable.
 The split between reads and writes matters here:
 
 - **Reads** under divergent policy use the **intersection** of all current
-  clean heads — most restrictive wins. If any clean head forbids a read, the
-  read fails closed. This is deterministic: it depends only on the observed
-  policy DAG, not on wall-clock order.
+  non-divergent policy heads — most restrictive wins. If any non-divergent
+  head forbids a read, the read fails closed. This is deterministic: it
+  depends only on the observed policy DAG, not on wall-clock order.
 - **Writes** under divergent policy fail closed unless the write is valid
-  under all current clean heads. A write that one head permits and another
-  forbids is rejected.
+  under all current non-divergent heads. A write that one head permits and
+  another forbids is rejected.
 
 This avoids the "fall back to old permissive policy" trap without freezing
 the capsule for the duration of divergence. Divergence is collapsed by a
@@ -668,9 +762,9 @@ A tool already using generation N may finish against that generation. A later
 tool sees generation N+1. The view is a cache and can be rebuilt from a snapshot
 plus later revisions.
 
-V1 candidate storage for the materialized view is a local SQLite database in
-WAL mode, gitignored and rebuildable from revision files. SQLite provides
-atomic readers, crash-safe writes, and process-local locking, which together
+V1 storage for the materialized view is a local SQLite database in WAL mode,
+gitignored and rebuildable from revision files. SQLite provides atomic
+readers, crash-safe writes, and process-local locking, which together
 replace a custom lock primitive and a custom "generation" abstraction. The
 revision files in device-owned paths remain the source of truth; the SQLite
 database is a derived cache and may be deleted at any time.
@@ -685,19 +779,29 @@ Generation building is deterministic: building from the same observed event
 set produces byte-equivalent view contents. This invariant is what makes the
 view a safe cache.
 
-## Snapshots and Compaction
+## Snapshots and Compaction (V2 — not in V1)
+
+V1 does not implement snapshots, checkpoints, or compaction. The materialized
+view is rebuilt from the full observed event set on every sync. This section
+describes the shape snapshots would take when replay cost justifies them; it
+is not part of the V1 protocol.
 
 Snapshots reduce replay time. They do not initially delete authoritative
 revisions:
 
 ```yaml
 snapshot_id: checkpoint_20
-frontier:
-  dev_a: 1000
-  dev_b: 220
+observed_event_set_summary:
+  devices_present: [dev_a, dev_b]
+  revision_count: 1220
 semantic_heads: {}
 materialized_entries: {}
 ```
+
+Note: V1 has no `frontier` vector in the revision envelope (see Revision
+Envelope). A snapshot format that summarizes the observed event set would
+need to derive any per-device causal information from the revision DAG
+itself, not from an envelope field.
 
 Deleting files from the current Git tree does not remove their historical Git
 objects. Physical compaction therefore requires an epoch operation rather than
@@ -705,8 +809,8 @@ ordinary file deletion.
 
 A future epoch rollover may:
 
-1. produce a verified checkpoint containing the known frontier, semantic heads,
-   unresolved proposals, and tombstones;
+1. produce a verified checkpoint containing the known observed event set,
+   semantic heads, unresolved proposals, and tombstones;
 2. archive the old epoch under an archive ref or Git bundle;
 3. start a new main history from the checkpoint;
 4. load archived epochs on demand for full history queries.
@@ -738,13 +842,13 @@ user.
 **Delayed arrival splits a previously clean head.**
 
 8. Suppose only `Sirius:102` exists on Sirius at sync time. Sirius's view
-   marks the entry as locally non-divergent at this frontier.
+   marks the entry as locally non-divergent at this observed event set.
 9. Later, Vega comes online and pushes `Vega:34`, also a child of
    `Sirius:101`.
 10. Sirius's next fetch receives `Vega:34`. The view is rebuilt; the entry
     is now divergent. The previously-observed "non-divergent" state is not
-    persisted and is not violated — it was true at the earlier frontier and
-    is false at the current one.
+    persisted and is not violated — it was true at the earlier observed
+    event set and is false at the current one.
 
 **Concurrent merges themselves diverge.**
 
@@ -757,10 +861,14 @@ user.
 
 **Crash recovery.**
 
-13. A worker crashes after the rename-fsync but before the directory-fsync.
-    The revision file is on disk; the directory entry may or may not be
-    present. Recovery scans final revision paths; partial or temporary files
-    are ignored.
+13. A worker crashes after the rename returns but before the directory-fsync
+    completes. The rename call is atomic, so at the moment of crash the file
+    is either at its old path or its new path, never both. The risk is that
+    the directory update recording the rename was not durably persisted to
+    disk. After crash recovery, the file may or may not appear in its final
+    path. Recovery scans final revision paths only: revisions that appear
+    are accepted; revisions that do not appear are treated as never written.
+    Temporary files left by crashes earlier in the sequence are ignored.
 14. A worker crashes after Git commit but before push. Startup detects that
     the capsule repository is locally ahead and retries transport without
     generating a duplicate revision (idempotent delivery by revision ID).
@@ -808,8 +916,8 @@ user.
 7. A device writes only immutable revisions in its own replica path.
 8. Local durability uses tempfile → fsync → atomic-rename → dir-fsync.
 9. Network push is not a precondition for local write success.
-10. The local write lock is held only across disk operations, never across
-    network I/O.
+10. The local write lock is held across local disk operations, fetch, rebase,
+    and view rebuild. It is released only for push.
 
 **Sync and convergence**
 
@@ -831,9 +939,9 @@ user.
 17. `clean` and `divergent` are derived views of the observed DAG, not
     persisted monotonic states.
 18. A data revision records the project policy revision it observed.
-19. Reads under divergent policy use the intersection of all clean heads;
-    writes under divergent policy fail closed unless valid under all clean
-    heads.
+19. Reads under divergent policy use the intersection of all non-divergent
+    policy heads (most restrictive wins); writes under divergent policy
+    fail closed unless valid under all non-divergent policy heads.
 
 ## Current Implementation Gaps
 
@@ -879,7 +987,11 @@ Resolved by this revision:
   owners?~~ Resolved for V1: SQLite WAL. See Materialized Views and Local
   Write Execution.
 - ~~What reads remain available during project policy divergence?~~ Resolved:
-  intersection of all clean heads. See Project Policy.
+  intersection of all non-divergent heads. See Project Policy.
+- ~~How does sync surface the "you have N divergent heads across M entries"
+  state to the user?~~ Resolved for V1: `divergent_heads` query and
+  session-start count. See Cross-Device Revision Behavior, "Surfacing
+  divergence."
 
 Still open:
 
@@ -889,18 +1001,14 @@ Still open:
    safe for automatic convergence in the materialized view?
 4. What caller-stable idempotency key scheme (if any) is required for
    exactly-once tool semantics, or is at-least-once permanently accepted?
-5. How does sync surface the "you have N divergent heads across M entries"
-   state to the user, and what user action initiates a merge?
-6. What snapshot format and verification rules are required?
-7. When may an offline or lost device be excluded from an epoch frontier?
-8. How are archived epochs discovered and retrieved for history queries?
-9. What is the on-disk shape of the SQLite materialized view, and how is it
+5. What snapshot format and verification rules are required?
+6. When may an offline or lost device be excluded from an epoch frontier?
+7. How are archived epochs discovered and retrieved for history queries?
+8. What is the on-disk shape of the SQLite materialized view, and how is it
    rebuilt on demand from revision files?
 
 ## Explicit Non-Goals for This Proposal
 
-- selecting a storage database for the materialized view (V1 candidate: SQLite,
-  see Materialized Views — but the protocol does not require it);
 - preserving the current JSONL ABI unchanged;
 - defining a user interface for merge review;
 - implementing automatic text merges;
