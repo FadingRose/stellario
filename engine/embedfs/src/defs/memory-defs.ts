@@ -643,65 +643,10 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
     },
   }
 
-  // ─── meta: calibrate agent behavior across sessions ────────────────────────
-
-  const meta: ToolDef = {
-    description:
-      "Record a behavioral calibration that persists across sessions. " +
-      "Use this when you notice you should adjust your approach — the calibration " +
-      "is injected into your system context on next session startup. " +
-      "Examples: prefer brevity, always read files before editing, confirm before destructive ops.",
-    args: {
-      content: z.string().describe("The behavioral calibration. Be specific and actionable."),
-    },
-    async execute(args, context: ToolContext) {
-      if (!args.content?.trim()) return "\u274c content is required."
-
-      const ctx = resolveContext(context)
-      const agent = resolveAgent(context.agent, ctx.config)
-      if (!agent) return `\u274c Unknown agent: "${context.agent}"`
-
-      // Find the meta volume (first mutable volume named "meta")
-      let metaVol: string | null = null
-      for (const [name, def] of Object.entries(ctx.config.volumes)) {
-        if (name === "meta" && def.profile === "mutable") {
-          metaVol = name
-          break
-        }
-      }
-      if (!metaVol) return "\u274c No meta volume defined. Add a 'meta' volume with profile: mutable to stellario.yaml."
-
-      if (!canWrite(agent, metaVol, ctx.config)) {
-        return `\u274c Agent "${agent}" cannot write to meta volume.`
-      }
-
-      const tags = ["type:prompt"]
-      const id = generateNextId(ctx.memDir, metaVol, ctx.config, ctx.star)
-
-      const entry: MemoryEntry = {
-        id,
-        volume: metaVol,
-        content: args.content.trim(),
-        tags,
-        keywords: [],
-        author: agent,
-        created: today(),
-        updated: today(),
-      }
-
-      const entries = readJsonl(ctx.memDir, metaVol)
-      entries.push(entry)
-      writeEntries(ctx.memDir, metaVol, entries, ctx.config)
-
-      gitCommit(ctx.memDir, metaVol, `meta: ${truncate(args.content, 50)}\n\nEntry: ${id}\nAuthor: ${agent}`, ctx.config)
-
-      return [
-        `Calibrated [${toDisplayId(id, metaVol)}] → ${metaVol}`,
-        `This calibration will take effect on next session startup.`,
-        `Author: ${agent}`,
-      ].join("\n")
-    },
-  }
+  // NOTE: The dedicated `meta` tool has been removed.
+  // To write a behavioral calibration, use `create(volume="meta", content=..., tags=[...], keywords=[...])`.
+  // Meta entries are injected into the system prompt at session startup by default.
+  // To exclude an entry from injection, add the `meta:disable` tag via `revise`.
 
   // ─── ref: create a manual reference between entries ───────────────────────
 
@@ -871,5 +816,5 @@ export function getMemoryToolDefs(): Record<string, ToolDef> {
     },
   }
 
-  return { create, show, revise, forget, history, meta, ref, unref }
+  return { create, show, revise, forget, history, ref, unref }
 }

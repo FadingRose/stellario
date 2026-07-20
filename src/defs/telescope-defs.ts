@@ -103,12 +103,19 @@ function matchTags(entry: MemoryEntry, tags?: string[], tagsAny?: string[], tags
  *
  * Also treats actual empty strings, whitespace-only strings, and the
  * literal strings "undefined"/"null" as absent.
+ *
+ * Additionally treats "[]" and "{}" as absent: when an LLM passes an empty
+ * array or object for a string-typed optional parameter, the tool bridge
+ * may serialize it as the JSON string "[]" or "{}", which would otherwise
+ * be treated as a valid (but nonsensical) filter value and silently filter
+ * out all entries.
  */
 function sanitizeOptionalString(val: unknown): string | undefined {
   if (typeof val !== "string") return undefined
   const trimmed = val.trim()
   if (trimmed === "" || trimmed === '""' || trimmed === "''" ||
-      trimmed === "undefined" || trimmed === "null") {
+      trimmed === "undefined" || trimmed === "null" ||
+      trimmed === "[]" || trimmed === "{}") {
     return undefined
   }
   return trimmed
@@ -213,8 +220,6 @@ export function getTelescopeToolDefs(): Record<string, ToolDef> {
           allEntries.push({ entry, volume: vol })
         }
       }
-
-      // Native mount volumes are already in config.volumes and handled by readJsonl.
       // No ad-hoc linked volume code needed.
 
       // ── Author filter (applies to all modes) ──

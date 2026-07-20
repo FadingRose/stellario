@@ -263,12 +263,13 @@ export function buildStatus(projectRoot: string, agentName: string): string {
     }
   }
 
-  // ── Dynamic prompt injection (type:prompt entries in meta) ──
+  // ── Dynamic prompt injection (meta volume — all entries by default) ──
   const metaVol = findMetaVolume(config)
   if (metaVol) {
     const metaEntries = readJsonl(memDir, metaVol)
+    // meta is injected by default. Use the `meta:disable` tag to exclude an entry.
     const promptEntries = metaEntries.filter(e =>
-      e.tags.some(t => t === "type:prompt")
+      !e.tags.some(t => t === "meta:disable")
     )
 
     if (promptEntries.length > 0) {
@@ -331,6 +332,14 @@ export function buildStatus(projectRoot: string, agentName: string): string {
   lines.push("```")
   lines.push("")
   lines.push("The next session's agent will read the latest handoff to continue seamlessly.")
+  lines.push("")
+  lines.push("### Meta Volume — Behavioral Calibration")
+  lines.push("")
+  lines.push("The `meta` volume holds cross-session behavioral calibrations (methodology lessons, tool quirks, reusable mental models). Entries in `meta` are **injected into your system prompt at session startup** — you see them automatically, no need to search.")
+  lines.push("")
+  lines.push("- Write calibrations with `create(volume=\"meta\", ...)`.")
+  lines.push("- All meta entries are injected by default. To exclude an entry from injection (e.g. it's superseded or project-specific), add the `meta:disable` tag via `revise`.")
+  lines.push("- Keep meta lean: signal dilutes with volume. Prefer revising an existing entry over creating a new one when the topic overlaps.")
 
   return lines.join("\n")
 }
