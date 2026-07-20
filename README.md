@@ -160,7 +160,6 @@ agent (stellario)                ← cognitive identity (first class)
 | `revise` | memory | Edit content via line ranges |
 | `forget` | memory | Archive an entry |
 | `history` | memory | View git revision history |
-| `meta` | memory | Record cross-session behavioral calibration |
 | `ref` | memory | Create manual reference between entries |
 | `unref` | memory | Remove a reference between entries |
 | `search` | telescope | Unified search (text + tags + semantic) |
@@ -238,17 +237,27 @@ Five profiles drive how entries behave:
 | `frozen` | — | — | — | ✓ | sequential (inherited) |
 | `workspace` | ✓ | ✓ | ✓ | ✓ | sequential + star suffix |
 
+## Meta Volume — Behavioral Calibration
+
+The `meta` volume holds cross-session calibrations: methodology lessons, tool quirks, reusable mental models. **All meta entries are injected into the agent's system prompt at session startup** — the agent sees them automatically, no need to search.
+
+- Write with `create(volume="meta", content=..., tags=[...], keywords=[...])`.
+- To exclude an entry from injection (e.g. it's superseded or project-specific), add the `meta:disable` tag via `revise`.
+- The agent self-manages this: it knows the injection rules from the tool-level usage guide, and decides what to calibrate vs. what to record elsewhere.
+
 ## Troubleshooting
 
 ### Tools not loading after stellario source changes
 
-Opencode loads stellario from `~/.opencode/node_modules/stellario`. If this is a stale npm-installed copy (not a symlink to source), source edits won't take effect:
+Opencode loads stellario from `~/.config/opencode/node_modules/stellario`. If source changes aren't taking effect, rerun setup to sync the embedded TS runtime:
 
 ```bash
-# Fix: replace with symlink to source
-rm -rf ~/.opencode/node_modules/stellario
-ln -s /path/to/stellario ~/.opencode/node_modules/stellario
+cd stellario/engine
+make install   # rebuild binary with updated embedded source
+stellario setup  # re-extract TS runtime + relink opencode
 ```
+
+Then reload opencode (restart or `/reload`).
 
 ### Go resolve not working
 
@@ -267,16 +276,17 @@ cp stellario ~/.local/bin/stellario
 ### Clean rebuild (preserving memory)
 
 ```bash
-# Generated files — safe to delete
-rm .opencode/tools/stellario-*.ts
-rm .opencode/plugin/stellario-inject.ts
-rm .opencode/agents/*.md
-rm .opencode/package.json .opencode/package-lock.json
-rm -rf .opencode/node_modules
+# Remove opencode integration files — safe to delete
+rm ~/.config/opencode/tools/stellario-*.ts
+rm ~/.config/opencode/plugin/stellario-inject.ts
+rm ~/.config/opencode/agent/stellario.md
+rm -rf ~/.config/opencode/node_modules/stellario
 
-# Then re-init
-npx stellario init --template <your-template>
+# Re-init from the Go binary
+stellario setup
 ```
+
+Your memory at `~/.stellario/` is preserved.
 
 ### Config validation fails
 
