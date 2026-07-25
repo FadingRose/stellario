@@ -233,12 +233,16 @@ dangling ref fails the migration.
    incremental patches) enable an incrementally-maintained index rather than
    full rebuild on every change. This is custom work but bounded.
 
-3. **autosurgeon maturity.** autosurgeon would simplify struct ↔ doc mapping
-   but is younger than the core crate. **Validated by prototype**: the
-   low-level `automerge` API (`ReadDoc` / `Transactable`) maps stellario's
-   schema directly and is straightforward — autosurgeon is a nice-to-have
-   optimization, not a dependency. If autosurgeon proves immature, the
-   low-level path is the fallback that already works.
+3. **autosurgeon as the schema layer.** **Validated by prototype** (`src/bin/autosurge.rs`):
+   derived `#[derive(Reconcile, Hydrate)]` on `Entry`/`MemRef`/`Capsule` structs
+   maps stellario's schema with serde-like ergonomics — one `reconcile()` writes
+   the whole structure, one `hydrate()` reads it. The smart-diff reconcile
+   preserves CRDT concurrent-merge semantics (content LWW + tag/ref CRDT lists
+   converge identically to the low-level API). Code volume drops from ~250 lines
+   of manual put/get/insert to 3 struct derives. **autosurgeon is the right
+   path for the schema layer.** One caveat: re-hydrate the structure after each
+   merge (no incremental live structs yet) — acceptable at stellario's scale
+   (re-hydrating a few thousand entries per sync, a correctness-neutral cost).
 
 4. **Git transport of binary docs.** Automerge docs are append-only binary;
    git stores them opaquely (no useful diff). Concern: repo growth. Mitigation:
