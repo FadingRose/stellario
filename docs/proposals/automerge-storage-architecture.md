@@ -233,9 +233,12 @@ dangling ref fails the migration.
    incremental patches) enable an incrementally-maintained index rather than
    full rebuild on every change. This is custom work but bounded.
 
-3. **autosurgeon maturity.** autosurgeon simplifies struct ↔ doc mapping but
-   is younger than the core crate. Fallback: use Automerge's low-level
-   `ReadDoc` / `Transactable` API directly. Either way the schema is explicit.
+3. **autosurgeon maturity.** autosurgeon would simplify struct ↔ doc mapping
+   but is younger than the core crate. **Validated by prototype**: the
+   low-level `automerge` API (`ReadDoc` / `Transactable`) maps stellario's
+   schema directly and is straightforward — autosurgeon is a nice-to-have
+   optimization, not a dependency. If autosurgeon proves immature, the
+   low-level path is the fallback that already works.
 
 4. **Git transport of binary docs.** Automerge docs are append-only binary;
    git stores them opaquely (no useful diff). Concern: repo growth. Mitigation:
@@ -262,6 +265,28 @@ dangling ref fails the migration.
    Storage + ID model should settle first; control-plane features then build
    on the stable foundation. Building them on the old ID model would force
    rework.
+
+## Prototype Validation
+
+A self-contained Rust prototype (`prototype/automerge-poc/`) validates the
+core thesis empirically, using real stellario data (the user-profile entry and
+an edelweiss audit entry) across two simulated devices:
+
+- **Content revision (LWW) + concurrent tag addition (CRDT list)** converge
+  without loss — A's revised content and B's added tag both present after sync.
+- **Concurrent refs** both survive (CRDT list union) — A's ref→m03 and B's
+  ref→l14 both retained.
+- **Field conflicts** resolve deterministically (LWW winner), with the loser
+  observable via `get_all` — no silent data loss.
+- **Provenance** is inherent: each change records its ActorId; entry IDs are
+  device-agnostic map keys.
+- **Doc size**: a 2-entry capsule with operations serializes to 558 bytes —
+  git transport of binary docs is not a size concern at this scale (scale
+  testing for thousands of entries remains warranted).
+
+The prototype uses the low-level `automerge` API, confirming the schema maps
+directly without requiring autosurgeon (see open question 3). Convergence
+behavior is no longer a hypothesis — it is demonstrated.
 
 ## Scope and Sequencing
 
