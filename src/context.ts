@@ -143,15 +143,17 @@ export function tryGoResolve(projectRoot: string): GoResolveResult | null {
 /**
  * Resolve the full runtime context from an opencode ToolContext.
  *
- * Path A (Go resolve): Data in ~/.stellario/projects/{name}/{device}/.
+ * Guardian path (identity-driven): if the agent is declared in the global
+ *   config (~/.stellario/global/<device>/), it resolves to the global library
+ *   regardless of CWD. The guardian can be invoked from any directory.
+ *
+ * Path A (directory-driven, Go resolve): Data in ~/.stellario/projects/{name}/{device}/.
  *   Config from global library. Requires device-relative layout
  *   (stellario migrate-device).
  *
  * Path A failed + project config present → explicit ERROR. No silent local
  *   fallback — prevents brain split (l341). Usually flat→device-relative
  *   mismatch; run `stellario migrate-device`.
- *
- * Path C (non-project dirs, e.g. guardian agent): global meta volume.
  */
 /**
  * Inject native mounts into config.volumes as frozen/readonly.
@@ -219,60 +221,81 @@ function injectAutoMounts(config: StellarioConfig, siblings: SiblingDevice[] | u
 }
 
 /**
- * Read the device star name from ~/.stellario/.constellation.json.
- * Used by the global meta fallback when Go resolve is unavailable.
+ * Read the device identity from ~/.stellario/.device-id.
+ * Returns the device directory name (id) and star name.
  */
-function readGlobalStar(): string {
+interface DeviceId { id: string; star: string }
+function readDeviceId(): DeviceId | null {
   try {
-    const constPath = join(homedir(), ".stellario", ".constellation.json")
-    if (existsSync(constPath)) {
-      const data = JSON.parse(readFileSync(constPath, "utf-8"))
-      const stars = Object.keys(data.stars || {})
-      return stars[0] || ""
-    }
+    const p = join(homedir(), ".stellario", ".device-id")
+    if (!existsSync(p)) return null
+    const data = JSON.parse(readFileSync(p, "utf-8"))
+    if (!data.id) return null
+    return { id: data.id, star: data.star || "" }
   } catch { /* ignore */ }
-  return ""
+  return null
 }
 
 /**
- * Path C fallback: resolve to the global meta volume.
+ * Load the global context (the guardian's home): config + memDir + star.
+ * Cached after first load. Returns null if no global config exists.
  *
- * When no project config is available (e.g. the Stellario guardian agent
- * running from the home directory), fall back to the global meta volume so
- * that memory tools remain accessible. Returns null if the global config
- * does not exist.
+ * The guardian agent is whichever agent is declared in the global config.
+ * Resolution is identity-driven: regardless of CWD, the guardian always
+ * resolves here. This replaces the old directory-based Path C fallback.
  */
-function tryGlobalMetaFallback(ctx: ToolContext): ResolvedContext | null {
+let _globalCtxCache: { config: StellarioConfig; memDir: string; star: string } | null | undefined
+
+export function loadGlobalContext(): { config: StellarioConfig; memDir: string; star: string } | null {
+  if (_globalCtxCache !== undefined) return _globalCtxCache
   try {
-    const globalDir = join(homedir(), ".stellario", "global")
-    const globalConfigPath = join(globalDir, "stellario.yaml")
-    if (!existsSync(globalConfigPath)) return null
-
-    const config = loadConfigFromPath(globalConfigPath)
-
-    if (!_trackInitialized) {
-      initGitRepo(globalDir)
-      _trackInitialized = true
-    }
-
-    injectMounts(config, globalDir)
-    injectAutoMounts(config, [])
-
-    return {
-      config,
-      projectRoot: ctx.directory,
-      memDir: globalDir,
-      agent: ctx.agent,
-      star: readGlobalStar(),
-      projectName: "_global",
-    }
+    const dev = readDeviceId()
+    if (!dev) { _globalCtxCache = null; return null }
+    const memDir = join(homedir(), ".stellario", "global", dev.id)
+    const configPath = join(memDir, "stellario.yaml")
+    if (!existsSync(configPath)) { _globalCtxCache = null; return null }
+    const config = loadConfigFromPath(configPath)
+    _globalCtxCache = { config, memDir, star: dev.star }
+    return _globalCtxCache
   } catch {
+    _globalCtxCache = null
     return null
   }
 }
 
+/**
+ * Is this agent the guardian? The guardian is any agent declared in the
+ * global config. It resolves to the global library regardless of CWD.
+ */
+export function isGuardianAgent(agentName: string): boolean {
+  const g = loadGlobalContext()
+  return !!g && (agentName in g.config.agents)
+}
+
 export function resolveContext(ctx: ToolContext): ResolvedContext {
-  // ── Path A: Try Go resolve ──
+  // ── Guardian resolution (identity-driven, not directory-driven) ──
+  // The guardian agent is declared in the global config and can be invoked
+  // from any directory. It always resolves to the global library, regardless
+  // of CWD. This replaces the old directory-based Path C fallback.
+  if (isGuardianAgent(ctx.agent)) {
+    const g = loadGlobalContext()!
+    if (!_trackInitialized) {
+      initGitRepo(g.memDir)
+      _trackInitialized = true
+    }
+    injectMounts(g.config, g.memDir)
+    injectAutoMounts(g.config, [])
+    return {
+      config: g.config,
+      projectRoot: ctx.directory,
+      memDir: g.memDir,
+      agent: ctx.agent,
+      star: g.star,
+      projectName: "_global",
+    }
+  }
+
+  // ── Path A: directory-driven Go resolve ──
   const goResult = tryGoResolve(ctx.directory)
   if (goResult) {
     const config = loadConfigFromPath(goResult.config_path)
@@ -299,8 +322,6 @@ export function resolveContext(ctx: ToolContext): ResolvedContext {
   }
 
   // ── Path A failed — NO silent local fallback (prevents brain split, see l341). ──
-  // Project dir (has config but resolve failed) → explicit error.
-  // Non-project dir (guardian/home) → Path C global meta.
   if (!getGoBinary()) {
     throw new Error(
       "Stellario Go binary not found — memory tools unavailable. Reinstall stellario."
@@ -313,21 +334,15 @@ export function resolveContext(ctx: ToolContext): ResolvedContext {
     throw new Error(
       `Project at ${ctx.directory} has a stellario config but Go resolve failed ` +
       "(exists=false). Usually flat→device-relative layout mismatch.\n" +
-      "Fix: stellario project register (if unregistered) + stellario migrate-device.\n" +
-      "Path B local fallback removed to prevent silent brain split (l341)."
+      "Fix: stellario project register (if unregistered) + stellario migrate-device."
     )
   }
 
-  // ── Path C: Global meta fallback (non-project dirs, e.g. guardian agent) ──
-  // When no project config is available (e.g. the Stellario guardian agent
-  // running outside any project directory), fall back to the global meta
-  // volume so memory tools remain accessible.
-  const globalCtx = tryGlobalMetaFallback(ctx)
-  if (globalCtx) return globalCtx
-
-  // All paths failed — surface the original error
+  // All paths failed: no project config, and the agent is not the guardian.
   throw new Error(
-    "Stellario config not found. Create .opencode/stellario.yaml or stellario.yaml in your project root."
+    `No stellario context for agent "${ctx.agent}" in ${ctx.directory}. ` +
+    "The guardian agent resolves to the global library; project agents require a " +
+    "project config. Create .opencode/stellario.yaml or run from a registered project."
   )
 }
 

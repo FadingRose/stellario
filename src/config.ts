@@ -1,28 +1,23 @@
 import { readFileSync, existsSync } from "fs"
 import { join } from "path"
 import { parse as parseYaml } from "yaml"
-import type { StellarioConfig, VolumeDef, Profile } from "./types.js"
+import type { StellarioConfig, VolumeDef, Profile, AgentDef } from "./types.js"
 import { profileBehavior } from "./types.js"
 
 const CONFIG_FILENAME = "stellario.yaml"
 
 // =============================================================================
-// System Volumes (reserved keywords — user cannot override)
+// System Volume Defaults (overridable)
 // =============================================================================
 //
-// These volumes are required for stellario's core functionality. They are
-// automatically injected into every config at load time. If a user defines
-// a volume with the same name in stellario.yaml, the user definition is
-// ignored with a warning.
-//
-// Semantics: system volumes are agent-isolated by default — every agent
-// can read and write, but runtime author-filtering ensures each agent only
-// sees their own entries (except archived which is shared history).
+// These volumes provide sensible defaults so a minimal config works without
+// declaring them. They are NOT reserved — a project config can override any
+// field (profile, idPrefix, boundaries, etc.) for these volumes. Config is
+// the authority; system defaults only fill in fields the config omits.
 //
 //   archived  (frozen)    — destination for forgotten entries
-//   meta      (mutable)   — behavioral calibrations, type:prompt injection
-//   handover  (append)    — session handoff logs (immutable per entry)
-//   layer     (workspace) — roadmap + workspace entries
+//   meta      (mutable)   — behavioral calibrations, injected into prompts
+//   handover  (append)    — session handoff logs
 
 const SYSTEM_VOLUMES: Record<string, VolumeDef> = {
   archived: {
@@ -39,11 +34,6 @@ const SYSTEM_VOLUMES: Record<string, VolumeDef> = {
     profile: "append",
     boundaries: { read: ["all"], write: ["all"] },
     idPrefix: "h",
-  },
-  layer: {
-    profile: "workspace",
-    boundaries: { read: ["all"], write: ["all"] },
-    idPrefix: "l",
   },
 }
 
@@ -104,7 +94,7 @@ function validateConfig(raw: any, sourcePath: string): StellarioConfig {
     throw new Error(`Invalid config: "volumes" is required and must be an object.`)
   }
 
-  const validProfiles: Profile[] = ["mutable", "append", "scratch", "frozen", "workspace"]
+  const validProfiles: Profile[] = ["mutable", "append", "scratch", "frozen"]
   // Intermediate storage: system volumes may not have boundaries in user config
   const userVolumes: Record<string, Partial<VolumeDef> & { profile: Profile }> = {}
 
@@ -112,11 +102,10 @@ function validateConfig(raw: any, sourcePath: string): StellarioConfig {
     const v = def as Record<string, any>
     const isSystem = SYSTEM_VOLUME_NAMES.has(name)
 
-    // System volumes: profile is locked, but other fields (boundaries,
-    // requiredTagPrefix, autoRefs, etc.) can be customized by user.
+    // System volumes: profile defaults from system, but user may override.
     // Non-system volumes: user must specify profile.
     const profile = isSystem
-      ? SYSTEM_VOLUMES[name].profile  // locked
+      ? (v.profile || SYSTEM_VOLUMES[name].profile)  // user override, else default
       : v.profile
 
     if (!profile || !validProfiles.includes(profile)) {
@@ -152,19 +141,17 @@ function validateConfig(raw: any, sourcePath: string): StellarioConfig {
     }
   }
 
-  // Merge system volumes: system provides defaults, user overrides non-profile fields
+  // Merge system volume defaults: config is authoritative — user fields win,
+  // system defaults only fill in fields the config omits.
   for (const [name, sysDef] of Object.entries(SYSTEM_VOLUMES)) {
     const userDef = userVolumes[name]
     if (userDef) {
-      // User defined this system volume — merge:
-      // system provides profile + idPrefix defaults,
-      // user overrides boundaries, requiredTagPrefix, autoRefs, authority
       volumes[name] = {
-        profile: sysDef.profile,         // always locked
+        profile: userDef.profile,        // user override (default applied at parse)
         boundaries: userDef.boundaries || sysDef.boundaries,
         authority: userDef.authority || sysDef.authority,
         requiredTagPrefix: userDef.requiredTagPrefix || sysDef.requiredTagPrefix,
-        idPrefix: sysDef.idPrefix,       // idPrefix locked for system volumes
+        idPrefix: userDef.idPrefix || sysDef.idPrefix,
         autoRefs: userDef.autoRefs || sysDef.autoRefs,
       }
     } else {
@@ -189,25 +176,23 @@ function validateConfig(raw: any, sourcePath: string): StellarioConfig {
     }
   }
 
-  // Validate workspace uniqueness
-  const workspaceVolumes = Object.entries(volumes).filter(([, v]) => v.profile === "workspace")
-  if (workspaceVolumes.length > 1) {
-    throw new Error(
-      `At most one volume can have profile "workspace". Found: ${workspaceVolumes.map(([n]) => n).join(", ")}`
-    )
-  }
-
   // Agents
   if (!raw.agents || typeof raw.agents !== "object") {
     throw new Error(`Invalid config: "agents" is required and must be an object.`)
   }
 
-  const agents: Record<string, { display: string }> = {}
+  const agents: Record<string, AgentDef> = {}
   for (const [name, def] of Object.entries(raw.agents)) {
     const a = def as Record<string, any>
-    agents[name] = {
-      display: a.display || name,
+    const agent: AgentDef = { display: a.display || name }
+    if (a.role === "primary" || a.role === "subagent") agent.role = a.role
+    if (a.inject && typeof a.inject === "object") {
+      const meta = Array.isArray(a.inject.meta)
+        ? a.inject.meta.filter((t: any) => typeof t === "string")
+        : undefined
+      if (meta && meta.length > 0) agent.inject = { meta }
     }
+    agents[name] = agent
   }
 
   // Validate boundaries reference known agents
@@ -251,16 +236,6 @@ function normalizeAgentList(value: string[] | string | undefined): string[] {
 // =============================================================================
 // Config Utilities
 // =============================================================================
-
-/**
- * Get the workspace volume name, or null if none configured.
- */
-export function getWorkspaceVolume(config: StellarioConfig): string | null {
-  for (const [name, def] of Object.entries(config.volumes)) {
-    if (def.profile === "workspace") return name
-  }
-  return null
-}
 
 /**
  * Get all volume names that are git-tracked.

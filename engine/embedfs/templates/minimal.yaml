@@ -33,9 +33,6 @@ memoryDir: ".opencode/.stellario"
 #                Use for: the archive volume where forgotten entries land.
 #                You should always have one "archived" volume with this profile.
 #
-#   workspace  — Like mutable, but also tracks which entry is "active".
-#                Use for: the agent's current task context.
-#                Only ONE workspace volume allowed per project.
 #
 # Boundaries:
 #   write: [agent1, agent2]  — which agents can create/edit entries
@@ -61,8 +58,8 @@ volumes:
       write: [stellario]
       read: [stellario]
 
-  workspace:
-    profile: workspace
+  layer:
+    profile: mutable
     boundaries:
       write: [stellario]
       read: [stellario]

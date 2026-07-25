@@ -12,9 +12,8 @@
  * - append:     can create only. cannot revise or forget. permanent, stable IDs.
  * - scratch:    can create, revise, forget. transient (not git-tracked), ephemeral IDs.
  * - frozen:     cannot create, revise, or forget. read-only.
- * - workspace:  like mutable + tracks active entry (per-project, unique).
  */
-export type Profile = "mutable" | "append" | "scratch" | "frozen" | "workspace"
+export type Profile = "mutable" | "append" | "scratch" | "frozen"
 
 /**
  * Derived behavioral flags from a profile.
@@ -29,8 +28,6 @@ export interface ProfileBehavior {
   isTracked: boolean
   /** Do entries use stable sequential IDs (vs ephemeral short hash)? */
   hasStableId: boolean
-  /** Does this volume track an active entry? (workspace only) */
-  tracksActive: boolean
 }
 
 // ─── Boundaries ─────────────────────────────────────────────────────────────
@@ -80,6 +77,14 @@ export interface AgentDef {
   display: string
   /** Agent role: "primary" (user-facing) or "subagent" (dispatched via task). Default: "subagent". */
   role?: "primary" | "subagent"
+  /** Optional: control which meta entries are injected into this agent's prompt.
+   *  Omit to inject all non-disabled meta entries (default behavior).
+   *  Specify `meta: [tags]` to inject only entries matching at least one tag.
+   *  `meta:disable` on an entry always wins (excludes regardless). */
+  inject?: {
+    /** Tags to match: an entry is injected if it has at least one of these tags. */
+    meta?: string[]
+  }
 }
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -145,8 +150,6 @@ export interface VolumeIndexEntry {
   volume: string
   files: string[]        // ordered list of JSONL files
   next_nonce: number     // next available nonce for ID generation
-  active_workspace?: string              // legacy: single global active entry (migrated to map on read)
-  active_workspaces?: Record<string, string>  // per-agent: { agentName: entryId }
   mount?: MountRef       // present if this volume is a native mount (references another project's volume)
 }
 
@@ -198,15 +201,13 @@ export interface ToolDef<A = any> {
 export function profileBehavior(profile: Profile): ProfileBehavior {
   switch (profile) {
     case "mutable":
-      return { canRevise: true, canForget: true, isTracked: true, hasStableId: true, tracksActive: false }
+      return { canRevise: true, canForget: true, isTracked: true, hasStableId: true }
     case "append":
-      return { canRevise: false, canForget: false, isTracked: true, hasStableId: true, tracksActive: false }
+      return { canRevise: false, canForget: false, isTracked: true, hasStableId: true }
     case "scratch":
-      return { canRevise: true, canForget: true, isTracked: false, hasStableId: false, tracksActive: false }
+      return { canRevise: true, canForget: true, isTracked: false, hasStableId: false }
     case "frozen":
-      return { canRevise: false, canForget: false, isTracked: true, hasStableId: true, tracksActive: false }
-    case "workspace":
-      return { canRevise: true, canForget: true, isTracked: true, hasStableId: true, tracksActive: true }
+      return { canRevise: false, canForget: false, isTracked: true, hasStableId: true }
   }
 }
 
@@ -214,7 +215,7 @@ export function profileBehavior(profile: Profile): ProfileBehavior {
  * Get all profile names that allow creating new entries.
  */
 export function createableProfiles(): Profile[] {
-  return ["mutable", "append", "scratch", "workspace"]
+  return ["mutable", "append", "scratch"]
 }
 
 /**

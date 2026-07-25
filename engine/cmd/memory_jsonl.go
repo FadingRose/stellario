@@ -411,7 +411,7 @@ func RunMeta(opts MetaOptions) error {
 		ID:      id,
 		Volume:  metaVol,
 		Content: strings.TrimSpace(opts.Content),
-		Tags:    []string{"type:prompt"},
+		Tags:    nil,
 		Author:  agent,
 		Created: jsonlstore.Today(),
 		Updated: jsonlstore.Today(),

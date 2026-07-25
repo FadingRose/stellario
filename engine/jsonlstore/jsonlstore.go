@@ -340,7 +340,7 @@ func CanRevise(volume string, cfg *Config) bool {
 	if !ok || def == nil {
 		return false
 	}
-	return def.Profile == config.ProfileMutable || def.Profile == config.ProfileWorkspace || def.Profile == config.ProfileScratch
+	return def.Profile == config.ProfileMutable || def.Profile == config.ProfileScratch
 }
 
 // CanForget reports whether a volume allows archiving entries.

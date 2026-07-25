@@ -16,11 +16,6 @@ tools:
   stellario-memory_unref: true
   stellario-telescope_search: true
   stellario-workspace_status: true
-  stellario-workspace_assemble: true
-  stellario-workspace_open: true
-  stellario-workspace_edit: true
-  stellario-workspace_add: true
-  stellario-workspace_remove: true
   stellario-volume-link_discover: true
   stellario-volume-link_link: true
   stellario-volume-link_unlink: true

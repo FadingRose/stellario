@@ -35,9 +35,6 @@ memoryDir: ".opencode/.writer-memory"
 #                Use for: the archive volume where forgotten entries land.
 #                You should always have one "archived" volume with this profile.
 #
-#   workspace  — Like mutable, but also tracks which entry is "active".
-#                Use for: the agent's current task context.
-#                Only ONE workspace volume allowed per project.
 #
 # Authority (optional semantic label — does NOT affect behavior):
 #   source      — Raw material from external input (conversations, data)
@@ -51,8 +48,8 @@ memoryDir: ".opencode/.writer-memory"
 
 volumes:
   # meta: behavioral calibrations and dynamic prompts.
-  #   Entries here with tag "type:prompt" are injected into the agent's
-  #   system context on session startup. Use for cross-session instructions.
+  #   All entries here are injected into the agent's system context on session
+  #   startup. Tag an entry `meta:disable` to exclude it from injection.
   meta:
     profile: mutable
     boundaries:
@@ -81,10 +78,10 @@ volumes:
     authority: curated
     idPrefix: "h"
 
-  # layer: the active workspace. Tracks what the agent is currently focused on.
+  # layer: development-layer decisions and records (a regular mutable volume).
   #   Both stellario and chronicler can write here for collaborative continuity.
   layer:
-    profile: workspace
+    profile: mutable
     boundaries:
       write: [stellario, chronicler]
       read: [stellario, chronicler]

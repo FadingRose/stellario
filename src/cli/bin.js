@@ -253,7 +253,7 @@ if (existsSync(stellarioAgentPath)) {
 } else {
   const memoryTools = ["stellario-memory_create", "stellario-memory_show", "stellario-memory_revise", "stellario-memory_forget", "stellario-memory_history", "stellario-memory_meta", "stellario-memory_ref", "stellario-memory_unref"]
   const searchTools = ["stellario-telescope_search"]
-  const workspaceTools = ["stellario-workspace_status", "stellario-workspace_assemble", "stellario-workspace_open", "stellario-workspace_edit", "stellario-workspace_add", "stellario-workspace_remove"]
+  const workspaceTools = ["stellario-workspace_status"]
   const volumeLinkTools = ["stellario-volume-link_discover", "stellario-volume-link_link", "stellario-volume-link_unlink"]
 
   const stellarioTools = [
@@ -403,7 +403,7 @@ Create a meta entry that persists across sessions:
 meta(content="Always confirm before archiving entries. Keep the playground clean.")
 \`\`\`
 
-Explain: meta entries with tag \\\`type:prompt\\\` are auto-injected into your system context on every session start. Use them for behavioral calibrations that outlive any single conversation.
+Explain: all meta entries are auto-injected into your system context on every session start. Use them for behavioral calibrations that outlive any single conversation. Tag an entry \\\`meta:disable\\\` to exclude it.
 
 ### Handoff: session continuity
 
@@ -496,7 +496,6 @@ Fill this in during the first conversation. Update whenever the user's needs cha
 - Use \\\`meta\\\` for behavioral calibrations (injected as prompts)
 - Use append volumes for handoff logs (immutable records)
 - Use scratch volumes for temporary drafts (not git-tracked)
-- Use \\\`workspace_assemble\\\` to gather related entries into a focused context
 - Use \\\`ref\\\` / \\\`unref\\\` for manual knowledge graph edges
 - Use \\\`discover\\\` / \\\`link\\\` to observe other projects' memory
 
@@ -586,7 +585,7 @@ for (const [name, , hint] of missing) {
 console.log("")
 console.log("Done! Next steps:")
 console.log(`  1. Edit .opencode/stellario.yaml to customize`)
-console.log(`  2. Create type:prompt entries in meta volume for dynamic prompts`)
+console.log(`  2. Create entries in meta volume for dynamic prompts (all injected by default)`)
 console.log(`  3. Start opencode — tools, plugin, and prompts auto-discovered`)
 
 // ── Helpers ────────────────────────────────────────────────────────────────

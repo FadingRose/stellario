@@ -12,15 +12,14 @@ import (
 type Profile string
 
 const (
-	ProfileMutable   Profile = "mutable"
-	ProfileAppend    Profile = "append"
-	ProfileScratch   Profile = "scratch"
-	ProfileFrozen    Profile = "frozen"
-	ProfileWorkspace Profile = "workspace"
+	ProfileMutable Profile = "mutable"
+	ProfileAppend  Profile = "append"
+	ProfileScratch Profile = "scratch"
+	ProfileFrozen  Profile = "frozen"
 )
 
 var validProfiles = []Profile{
-	ProfileMutable, ProfileAppend, ProfileScratch, ProfileFrozen, ProfileWorkspace,
+	ProfileMutable, ProfileAppend, ProfileScratch, ProfileFrozen,
 }
 
 // Boundaries controls which agent can access a volume.
@@ -42,6 +41,16 @@ type VolumeDef struct {
 type AgentDef struct {
 	Display string `yaml:"display"`
 	Role    string `yaml:"role,omitempty"`
+	// Inject controls which meta entries are injected into this agent's prompt.
+	// If Inject is nil, all non-disabled meta entries are injected (default).
+	Inject *InjectConfig `yaml:"inject,omitempty"`
+}
+
+// InjectConfig holds per-agent injection rules.
+type InjectConfig struct {
+	// Meta tags to match: an entry is injected if it has at least one of these tags.
+	// Empty/nil means inject all (same as omitting Inject entirely).
+	Meta []string `yaml:"meta,omitempty"`
 }
 
 // EmbeddingConfig controls semantic search.
@@ -72,8 +81,9 @@ type rawConfig struct {
 
 // ─── System Volumes ──────────────────────────────────────────────────────────
 
-// System volumes are automatically injected. User definitions for these names
-// merge with system defaults (profile is always locked).
+// System volumes provide sensible defaults for a minimal config. They are NOT
+// reserved — a project config can override any field. Config is authoritative;
+// system defaults only fill in omitted fields.
 var systemVolumes = map[string]*VolumeDef{
 	"archived": {
 		Profile:    ProfileFrozen,
@@ -89,11 +99,6 @@ var systemVolumes = map[string]*VolumeDef{
 		Profile:    ProfileAppend,
 		Boundaries: Boundaries{Read: []string{"all"}, Write: []string{"all"}},
 		IDPrefix:   "h",
-	},
-	"layer": {
-		Profile:    ProfileWorkspace,
-		Boundaries: Boundaries{Read: []string{"all"}, Write: []string{"all"}},
-		IDPrefix:   "l",
 	},
 }
 
@@ -213,14 +218,13 @@ func validateRaw(raw map[string]interface{}, sourcePath string) (*ValidateResult
 
 		isSystem := IsSystemVolume(name)
 
-		// Profile: system volumes lock it, others must specify
+		// Profile: user specifies if present; system volumes fall back to the
+		// system default when omitted. Non-system volumes require it explicitly.
 		var profile string
-		if isSystem {
+		if p, ok := defMap["profile"]; ok {
+			profile = fmt.Sprintf("%v", p)
+		} else if isSystem {
 			profile = string(systemVolumes[name].Profile)
-		} else {
-			if p, ok := defMap["profile"]; ok {
-				profile = fmt.Sprintf("%v", p)
-			}
 		}
 
 		if profile == "" || !isValidProfile(profile) {
@@ -278,9 +282,10 @@ func validateRaw(raw map[string]interface{}, sourcePath string) (*ValidateResult
 
 	for name, sysDef := range systemVolumes {
 		if userDef, exists := userVols[name]; exists {
-			// Merge: system provides profile + idPrefix, user overrides boundaries etc.
+			// Merge: config is authoritative — user fields win, system defaults
+			// fill in omitted fields (profile already resolved at parse stage).
 			merged := &VolumeDef{
-				Profile: sysDef.Profile, // always locked
+				Profile: userDef.Profile, // user override (default applied at parse)
 			}
 			if len(userDef.Boundaries.Read) > 0 || len(userDef.Boundaries.Write) > 0 {
 				merged.Boundaries = userDef.Boundaries
@@ -289,7 +294,11 @@ func validateRaw(raw map[string]interface{}, sourcePath string) (*ValidateResult
 			}
 			merged.Authority = userDef.Authority
 			merged.RequiredTagPrefix = userDef.RequiredTagPrefix
-			merged.IDPrefix = sysDef.IDPrefix // locked for system volumes
+			if userDef.IDPrefix != "" {
+				merged.IDPrefix = userDef.IDPrefix
+			} else {
+				merged.IDPrefix = sysDef.IDPrefix
+			}
 			volumes[name] = merged
 		} else {
 			// System volume not in user config — inject default
@@ -318,22 +327,7 @@ func validateRaw(raw map[string]interface{}, sourcePath string) (*ValidateResult
 				Severity: "error",
 			})
 		}
-	}
-
-	// ── Validate workspace uniqueness ──
-	var workspaceVols []string
-	for name, def := range volumes {
-		if def.Profile == ProfileWorkspace {
-			workspaceVols = append(workspaceVols, name)
-		}
-	}
-	if len(workspaceVols) > 1 {
-		result.Errors = append(result.Errors, ValidationError{
-			Field:    "profile",
-			Message:  fmt.Sprintf(`at most one volume can have profile "workspace". Found: %s`, joinStrings(workspaceVols, ", ")),
-			Severity: "error",
-		})
-	}
+ 	}
 
 	// ── Agents ──
 	rawAgents, ok := raw["agents"].(map[string]interface{})
@@ -365,7 +359,21 @@ func validateRaw(raw map[string]interface{}, sourcePath string) (*ValidateResult
 		if r, ok := defMap["role"]; ok {
 			role = fmt.Sprintf("%v", r)
 		}
-		agents[name] = &AgentDef{Display: display, Role: role}
+		agentDef := &AgentDef{Display: display, Role: role}
+		if inj, ok := defMap["inject"].(map[string]interface{}); ok {
+			if metaRaw, ok := inj["meta"].([]interface{}); ok {
+				var meta []string
+				for _, m := range metaRaw {
+					if s, ok := m.(string); ok && s != "" {
+						meta = append(meta, s)
+					}
+				}
+				if len(meta) > 0 {
+					agentDef.Inject = &InjectConfig{Meta: meta}
+				}
+			}
+		}
+		agents[name] = agentDef
 	}
 
 	// ── MemoryDir ──
