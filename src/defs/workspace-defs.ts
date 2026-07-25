@@ -360,6 +360,11 @@ function formatLockAge(isoTimestamp: string): string {
  * Icons show status and special markers (gap, blocked_by).
  */
 function renderPlanNode(node: PlanTreeNode, lines: string[], indent: number): void {
+  // Prune completed/cancelled subtrees — they are history, not active context.
+  // The summary line above already counts them; the rendered tree shows only
+  // work that is open, claimed, in_progress, pending, or review.
+  if (node.derived_status === "done" || node.derived_status === "cancelled") return
+
   const { item, children, derived_status } = node
 
   // Status icon (derived status for display)
