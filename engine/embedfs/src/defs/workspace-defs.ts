@@ -121,49 +121,59 @@ export function buildStatus(projectRoot: string, agentName: string): string {
     }
   }
 
-  // ── Roadmap (Plan Tree) ──
+  // ── Roadmap (summary + stale warnings) ──
+  // Inject only a summary and items that haven't moved in too long — the
+  // actionable signal. The full tree lives in the taskboard; the system prompt
+  // does not need every task.
   const planTree = buildPlanTree(memDir)
   const activeLocks = getAllActiveLocks(memDir)
 
-  // Count total active items (non-done, non-cancelled) across the tree
+  const STALE_MS = 7 * 86_400_000
+  const now = Date.now()
   let totalActive = 0
-  let totalChildren = 0
   let totalDone = 0
-  function countTree(nodes: PlanTreeNode[]) {
+  const stale: { id: string; title: string; owner?: string; ageDays: number }[] = []
+  function walk(nodes: PlanTreeNode[]) {
     for (const node of nodes) {
       if (node.children.length > 0) {
-        countTree(node.children)
+        walk(node.children)
       } else {
-        totalChildren++
         if (node.item.status === "done" || node.item.status === "cancelled") {
           totalDone++
         } else {
           totalActive++
+          const ts = new Date(node.item.updated || node.item.created || "").getTime()
+          if (!isNaN(ts) && (now - ts) > STALE_MS) {
+            stale.push({
+              id: node.item.id, title: node.item.title, owner: node.item.owner,
+              ageDays: Math.floor((now - ts) / 86_400_000),
+            })
+          }
         }
       }
     }
   }
-  countTree(planTree)
+  walk(planTree)
 
   if (planTree.length > 0 || activeLocks.length > 0) {
     lines.push("")
     lines.push("\u2500\u2500\u2500")
-
-    // Summary line
     const rootCount = planTree.length
-    const activeRoots = planTree.filter(n =>
-      !["done", "cancelled"].includes(n.derived_status)
-    ).length
-    lines.push(`Roadmap (${rootCount} milestone${rootCount !== 1 ? "s" : ""}, ${activeRoots} active, ${totalDone}/${totalChildren} tasks done):`)
+    const staleSuffix = stale.length > 0 ? `, ${stale.length} stale` : ""
+    lines.push(`Roadmap (${rootCount} milestone${rootCount !== 1 ? "s" : ""}, ${totalActive} active${staleSuffix}, ${totalDone} done):`)
 
-    // Render tree
-    for (const node of planTree) {
-      renderPlanNode(node, lines, 2)
+    if (stale.length > 0) {
+      lines.push(`  \u26a0 Stale (>7d no update):`)
+      for (const s of stale.slice(0, 15)) {
+        const owner = s.owner ? ` \u2014 ${s.owner}` : ""
+        lines.push(`    [${s.id}] ${s.title}${owner} (${s.ageDays}d)`)
+      }
+      if (stale.length > 15) {
+        lines.push(`    ... and ${stale.length - 15} more`)
+      }
     }
 
-    // Locks
     if (activeLocks.length > 0) {
-      lines.push("")
       for (const lock of activeLocks) {
         const age = formatLockAge(lock.acquired)
         const taskRef = lock.task_id ? ` \u2192 ${lock.task_id}` : ""
@@ -352,54 +362,4 @@ function formatLockAge(isoTimestamp: string): string {
   const hours = Math.floor(minutes / 60)
   const remMin = minutes % 60
   return remMin > 0 ? `${hours}h ${remMin}m ago` : `${hours}h ago`
-}
-
-/**
- * Render a plan tree node and its children.
- * Indent indicates hierarchy depth.
- * Icons show status and special markers (gap, blocked_by).
- */
-function renderPlanNode(node: PlanTreeNode, lines: string[], indent: number): void {
-  // Prune completed/cancelled subtrees — they are history, not active context.
-  // The summary line above already counts them; the rendered tree shows only
-  // work that is open, claimed, in_progress, pending, or review.
-  if (node.derived_status === "done" || node.derived_status === "cancelled") return
-
-  const { item, children, derived_status } = node
-
-  // Status icon (derived status for display)
-  const statusIcon: Record<string, string> = {
-    in_progress: "\u25b6",   // ▶
-    pending: "\u23f8",       // ⏸
-    claimed: "\u2611",       // ☑
-    open: "\u25cb",          // ○
-    review: "\u23f3",        // ⏳
-    done: "\u2714",          // ✔
-    cancelled: "\u2716",     // ✖
-  }
-
-  const icon = statusIcon[derived_status] || "\u2022"
-  const ownerStr = item.owner ? ` (${item.owner})` : ""
-  const statusStr = children.length > 0
-    ? derived_status  // parent: show derived status
-    : item.status     // leaf: show stored status
-
-  // Base line
-  const indentStr = " ".repeat(indent)
-  let line = `${indentStr}${icon} [${item.id}] ${item.title}${ownerStr}`
-  
-  // Special markers
-  if (item.gap) {
-    line += ` \u26a0 Missing: ${item.gap}`  // ⚠
-  }
-  if (item.blocked_by && item.blocked_by.length > 0) {
-    line += ` \u23f8 blocked: ${item.blocked_by.join(", ")}`  // ⏸
-  }
-
-  lines.push(line)
-
-  // Render children
-  for (const child of children) {
-    renderPlanNode(child, lines, indent + 2)
-  }
 }

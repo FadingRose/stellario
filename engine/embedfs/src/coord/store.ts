@@ -256,8 +256,8 @@ export function updateTaskStatus(
     )
   }
 
-  // Authorize: only the owner can transition claimed/in_progress/pending/review
-  if (["claimed", "in_progress", "pending", "review"].includes(task.status)) {
+  // Authorize: only the owner can transition claimed/pending/review
+  if (["claimed", "pending", "review"].includes(task.status)) {
     if (task.owner && task.owner !== agent) {
       throw new Error(
         `Task "${id}" is owned by "${task.owner}". Only the owner can change status from "${task.status}".`
@@ -265,18 +265,7 @@ export function updateTaskStatus(
     }
   }
 
-  // Check dependencies: can't start if dependencies aren't done
-  if (newStatus === "in_progress" && (task.depends_on?.length ?? 0) > 0) {
-    const allDeps = readTasks(memDir)
-    for (const depId of task.depends_on!) {
-      const dep = allDeps.find(t => t.id === depId)
-      if (dep && dep.status !== "done") {
-        throw new Error(
-          `Cannot start: dependency "${depId}" is ${dep.status} (needs to be done).`
-        )
-      }
-    }
-  }
+  // depends_on is advisory — shown on the task but not hard-gated.
 
   tasks[index] = {
     ...task,
@@ -395,11 +384,12 @@ export interface PlanTreeNode {
 
 /**
  * Derive parent status from children's status.
- * Rules (a04):
+ * Rules:
  *   - all children done/cancelled → done
- *   - at least one in_progress/review → in_progress
- *   - at least one pending → pending (blocked)
- *   - all open/claimed → open
+ *   - at least one pending → pending (blocked propagation)
+ *   - at least one review → review (advanced)
+ *   - at least one claimed → claimed (active work)
+ *   - all open → open
  */
 export function deriveParentStatus(children: PlanTreeNode[]): TaskStatus {
   if (children.length === 0) {
@@ -408,16 +398,19 @@ export function deriveParentStatus(children: PlanTreeNode[]): TaskStatus {
 
   const statuses = children.map(c => c.derived_status)
 
-  // Any pending → pending (blocked propagation)
-  if (statuses.some(s => s === "pending")) return "pending"
-
   // All terminal → done
   if (statuses.every(s => s === "done" || s === "cancelled")) return "done"
 
-  // At least one active work → in_progress
-  if (statuses.some(s => s === "in_progress" || s === "review")) return "in_progress"
+  // Any pending → pending (blocked propagation)
+  if (statuses.some(s => s === "pending")) return "pending"
 
-  // All open/claimed → open
+  // At least one review → review
+  if (statuses.some(s => s === "review")) return "review"
+
+  // At least one claimed → claimed (active work owned)
+  if (statuses.some(s => s === "claimed")) return "claimed"
+
+  // All open → open
   return "open"
 }
 

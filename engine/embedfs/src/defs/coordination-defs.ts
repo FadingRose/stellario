@@ -45,7 +45,7 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
       owner: z.string().optional().describe("Agent to assign (skips 'open', goes straight to 'claimed')."),
       paths: z.array(z.string()).optional().describe("Project-relative file paths this task will modify."),
       lock_paths: z.boolean().optional().describe("Also lock the paths immediately. Default: false."),
-      depends_on: z.array(z.string()).optional().describe("Task IDs this task depends on (hard dependency — blocks in_progress)."),
+      depends_on: z.array(z.string()).optional().describe("Task IDs this task depends on (advisory — shown but not hard-gated)."),
       tags: z.array(z.string()).optional().describe("Tags for categorization."),
       parent: z.string().optional().describe("Parent item ID — builds milestone > epic > task hierarchy."),
       blocked_by: z.array(z.string()).optional().describe("Item IDs blocking this one (collaboration signal — does not block transitions, just warns other agents)."),
@@ -163,7 +163,7 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
     description:
       "Update a task. Can change status (with transition validation), " +
       "or update metadata (title, body, paths, tags, parent, blocked_by, gap). " +
-      "Status transitions: open→claimed, claimed→in_progress, in_progress→pending/review/done, pending→in_progress, review→done. " +
+      "Status transitions: open→claimed, claimed→pending/review/done, pending→claimed, review→done. " +
       "Optional 'reason' to explain why the status changed (e.g. why blocked).",
     args: {
       id: z.string().describe("Task ID."),
@@ -270,7 +270,7 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
       status: z.union([
         z.string(),
         z.array(z.string()),
-      ]).optional().describe("Filter by status (e.g., 'open', 'in_progress', or ['open', 'claimed'])."),
+      ]).optional().describe("Filter by status (e.g., 'open', 'review', or ['open', 'claimed'])."),
       owner: z.string().optional().describe("Filter by owner. Use '' for unclaimed tasks."),
       author: z.string().optional().describe("Filter by author."),
       tags: z.array(z.string()).optional().describe("Filter by tags (AND)."),
@@ -320,7 +320,7 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
         lines.push("")
 
         // Group by status for readability
-        const statusOrder: TaskStatus[] = ["in_progress", "pending", "claimed", "open", "review", "done", "cancelled"]
+        const statusOrder: TaskStatus[] = ["review", "pending", "claimed", "open", "done", "cancelled"]
         const grouped = new Map<TaskStatus, typeof tasks>()
         for (const task of tasks) {
           const group = grouped.get(task.status) || []
@@ -333,7 +333,6 @@ export function getCoordinationToolDefs(): Record<string, ToolDef> {
           if (!group || group.length === 0) continue
 
           const statusIcon: Record<string, string> = {
-            in_progress: "\u25b6",
             pending: "\u23f8",
             claimed: "\u2611",
             open: "\u25cb",

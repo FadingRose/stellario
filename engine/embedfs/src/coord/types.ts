@@ -10,19 +10,19 @@
 /**
  * Task status lifecycle:
  *
- *   open → claimed → in_progress → review → done
- *                       ↓  ↑            ↓
- *                    pending        in_progress
- *                       ↓
- *                    cancelled
+ *   open → claimed → review → done
+ *              ↓  ↑           ↓
+ *           pending       claimed
+ *              ↓
+ *           cancelled
  *
  * Any non-terminal state can transition to cancelled.
  * pending = blocked mid-work (e.g. waiting on a dependency).
+ * claimed absorbs "actively working" — there is no separate in_progress state.
  */
 export type TaskStatus =
   | "open"
   | "claimed"
-  | "in_progress"
   | "pending"
   | "review"
   | "done"
@@ -34,10 +34,9 @@ export type TaskStatus =
  */
 export const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   open:        ["claimed", "cancelled"],
-  claimed:     ["in_progress", "open", "cancelled"],
-  in_progress: ["pending", "review", "done", "cancelled"],
-  pending:     ["in_progress", "cancelled"],
-  review:      ["done", "in_progress", "cancelled"],
+  claimed:     ["pending", "review", "done", "open", "cancelled"],
+  pending:     ["claimed", "cancelled"],
+  review:      ["done", "claimed", "cancelled"],
   done:        [],
   cancelled:   [],
 }
@@ -51,7 +50,7 @@ export interface Task {
   author: string          // agent who created the task
   owner?: string          // agent who claimed it
   paths: string[]         // project-relative file paths this task involves
-  depends_on: string[]    // task IDs this task depends on (hard dependency — blocks in_progress)
+  depends_on: string[]    // task IDs this task depends on (advisory — shown but not hard-gated)
   tags: string[]
   created: string         // YYYY-MM-DD
   updated: string         // YYYY-MM-DD
