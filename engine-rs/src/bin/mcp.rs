@@ -85,8 +85,9 @@ struct LoadedCapsule {
 struct StellarioServer {
     /// The loaded project capsule. None until `load_capsule` is called.
     capsule: Arc<RwLock<Option<LoadedCapsule>>>,
-    /// The global capsule (identity registry). Loaded from ~/.stellario/global.
-    global: Arc<RwLock<AutomergeStorage>>,
+    /// The global capsule (identity registry) + its on-disk path. Loaded from
+    /// ~/.stellario/global at startup. register_identity persists here.
+    global: Arc<RwLock<LoadedCapsule>>,
     /// Current session identity.
     identity: Arc<RwLock<Option<ResolvedIdentity>>>,
     tool_router: ToolRouter<Self>,
@@ -104,6 +105,16 @@ struct LoadCapsuleParams {
 struct SelectIdentityParams {
     /// The agent name to load (e.g. "edelweiss"). Must be registered in the global capsule.
     name: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct RegisterIdentityParams {
+    /// The agent name (e.g. "edelweiss"). Becomes its lookup key.
+    name: String,
+    /// Human-readable display name (e.g. "Edelweiss").
+    display: String,
+    /// What this agent does / its meta (shown on select_identity).
+    description: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -153,27 +164,43 @@ struct LineageParams {
 #[tool_router(router = tool_router)]
 impl StellarioServer {
     pub fn new() -> Self {
-        // Load global capsule (identity registry). Create empty if absent.
-        let global = {
-            let global_dir = stellario_root().join("global");
-            let mut device_dir = None;
+        // Load or create the global capsule (identity registry).
+        let global_dir = stellario_root().join("global");
+        let global_path = {
+            let mut found = None;
             if let Ok(entries) = std::fs::read_dir(&global_dir) {
                 for entry in entries.flatten() {
-                    if entry.path().is_dir() && entry.path().join("capsule.automerge").exists() {
-                        device_dir = Some(entry.path().join("capsule.automerge"));
+                    let cap = entry.path().join("capsule.automerge");
+                    if cap.exists() {
+                        found = Some(cap);
                         break;
                     }
                 }
             }
-            match device_dir.and_then(|p| std::fs::read(&p).ok()) {
-                Some(bytes) => AutomergeStorage::load(&bytes).unwrap_or_else(|_| AutomergeStorage::new()),
-                None => AutomergeStorage::new(),
+            // If no global capsule exists yet, create one in the first device dir.
+            found.unwrap_or_else(|| {
+                let dev = global_dir.join("default");
+                std::fs::create_dir_all(&dev).ok();
+                dev.join("capsule.automerge")
+            })
+        };
+
+        let global_storage = match std::fs::read(&global_path) {
+            Ok(bytes) if !bytes.is_empty() => AutomergeStorage::load(&bytes).unwrap_or_else(|_| AutomergeStorage::new()),
+            _ => {
+                // Fresh global capsule — persist immediately so the path is valid.
+                let mut s = AutomergeStorage::new();
+                if let Ok(bytes) = s.save() {
+                    let _ = std::fs::create_dir_all(global_path.parent().unwrap_or(&global_dir));
+                    let _ = std::fs::write(&global_path, &bytes);
+                }
+                s
             }
         };
 
         Self {
             capsule: Arc::new(RwLock::new(None)),
-            global: Arc::new(RwLock::new(global)),
+            global: Arc::new(RwLock::new(LoadedCapsule { storage: global_storage, path: global_path })),
             identity: Arc::new(RwLock::new(None)),
             tool_router: Self::tool_router(),
         }
@@ -205,13 +232,13 @@ impl StellarioServer {
     }
 
     /// Recall bootstrap: load an agent identity + return its meta.
-    #[tool(name = "select_identity", description = "Load an agent identity by name. Returns the agent's meta. Establishes session identity for write provenance. Call after load_capsule.")]
+    #[tool(name = "select_identity", description = "Load an agent identity by name. Returns the agent's meta. Establishes session identity for write provenance. Call after load_capsule. Use register_identity first if the name doesn't exist.")]
     async fn select_identity(
         &self,
         Parameters(SelectIdentityParams { name }): Parameters<SelectIdentityParams>,
     ) -> Result<Json<serde_json::Value>, String> {
         let global = self.global.read().await;
-        let resolved = select_identity(&global, &name).map_err(|e| e.to_string())?;
+        let resolved = select_identity(&global.storage, &name).map_err(|e| e.to_string())?;
         let meta = resolved.meta.clone();
         let display = resolved.display.clone();
         let instance = resolved.instance.clone();
@@ -220,6 +247,28 @@ impl StellarioServer {
             "identity": instance,
             "display": display,
             "meta": meta,
+        })))
+    }
+
+    /// Register a new agent identity in the global capsule. Persists to disk.
+    #[tool(name = "register_identity", description = "Register a new agent identity. Persists to the global capsule. Call this once per agent, then use select_identity to load it.")]
+    async fn register_identity(
+        &self,
+        Parameters(RegisterIdentityParams { name, display, description }): Parameters<RegisterIdentityParams>,
+    ) -> Result<Json<serde_json::Value>, String> {
+        let (id, hash) = {
+            let mut global = self.global.write().await;
+            let mut storage = std::mem::replace(&mut global.storage, AutomergeStorage::new());
+            let result = stellario::register_identity(&mut storage, &name, &display, &description, "bootstrap");
+            global.storage = storage;
+            result.map_err(|e| e.to_string())?
+        };
+        // Persist global capsule to disk.
+        persist_capsule(&self.global).await;
+        Ok(Json(serde_json::json!({
+            "id": format!("identity:{}", id),
+            "hash": hash,
+            "registered": name,
         })))
     }
 
@@ -245,13 +294,22 @@ impl StellarioServer {
 
         // Persist to disk.
         {
-            let mut cap_guard = self.capsule.write().await;
-            if let Some(loaded) = cap_guard.as_mut() {
-                let mut storage = std::mem::replace(&mut loaded.storage, AutomergeStorage::new());
-                let save_result = storage.save();
-                loaded.storage = storage;
-                let bytes = save_result.map_err(|e| e.to_string())?;
-                std::fs::write(&loaded.path, &bytes).map_err(|e| e.to_string())?;
+            let cap_guard = self.capsule.write().await;
+            if cap_guard.is_some() {
+                drop(cap_guard);
+                // persist_capsule needs a &Arc<RwLock<LoadedCapsule>>, but our
+                // capsule is Option<LoadedCapsule>. We persist by reconstructing.
+                let mut guard = self.capsule.write().await;
+                if let Some(loaded) = guard.as_mut() {
+                    let mut storage = std::mem::replace(&mut loaded.storage, AutomergeStorage::new());
+                    let result = storage.save();
+                    loaded.storage = storage;
+                    if let Ok(bytes) = result {
+                        let path = loaded.path.clone();
+                        drop(guard);
+                        let _ = std::fs::write(&path, &bytes);
+                    }
+                }
             }
         }
 
@@ -318,6 +376,19 @@ impl ServerHandler for StellarioServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::default()
             .with_server_info(Implementation::new("stellario", "0.1.0"))
+    }
+}
+
+/// Persist a LoadedCapsule to disk (swap out, save, swap back, write file).
+async fn persist_capsule(lock: &Arc<RwLock<LoadedCapsule>>) {
+    let mut guard = lock.write().await;
+    let mut storage = std::mem::replace(&mut guard.storage, AutomergeStorage::new());
+    let result = storage.save();
+    guard.storage = storage;
+    if let Ok(bytes) = result {
+        let path = guard.path.clone();
+        drop(guard);
+        let _ = std::fs::write(&path, &bytes);
     }
 }
 
