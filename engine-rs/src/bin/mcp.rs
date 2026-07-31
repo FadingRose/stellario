@@ -30,7 +30,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tokio::sync::RwLock;
 
-use stellario::{AutomergeStorage, ResolvedIdentity, SearchParams, Storage, search, select_identity};
+use stellario::{AutomergeStorage, ResolvedIdentity, SearchParams, Storage, Workdir, search, select_identity};
 
 // ─── Paths ─────────────────────────────────────────────────────────────────
 
@@ -85,11 +85,12 @@ struct LoadedCapsule {
 struct StellarioServer {
     /// The loaded project capsule. None until `load_capsule` is called.
     capsule: Arc<RwLock<Option<LoadedCapsule>>>,
-    /// The global capsule (identity registry) + its on-disk path. Loaded from
-    /// ~/.stellario/global at startup. register_identity persists here.
+    /// The global capsule (identity registry) + its on-disk path.
     global: Arc<RwLock<LoadedCapsule>>,
     /// Current session identity.
     identity: Arc<RwLock<Option<ResolvedIdentity>>>,
+    /// Session workdir for file-based editing (expand → edit → sync).
+    workdir: Arc<RwLock<Workdir>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -118,23 +119,18 @@ struct RegisterIdentityParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
-struct WriteParams {
-    volume: String,
-    #[serde(default)]
-    target_id: Option<String>,
-    content: String,
-    #[serde(default)]
-    tags: Vec<String>,
-    #[serde(default)]
-    keywords: Vec<String>,
-    /// REQUIRED: why this write is happening (the recall thread).
-    intent: String,
+struct ExpandParams {
+    /// Entry to expand, as volume:id (e.g. "meta:03").
+    id: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
-struct ShowParams {
+struct ExpandNewParams {
+    /// Volume for the new entry (e.g. "meta").
     volume: String,
-    id: String,
+    /// Optional id hint (e.g. "1"). If omitted, storage auto-generates.
+    #[serde(default)]
+    id_hint: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -202,6 +198,7 @@ impl StellarioServer {
             capsule: Arc::new(RwLock::new(None)),
             global: Arc::new(RwLock::new(LoadedCapsule { storage: global_storage, path: global_path })),
             identity: Arc::new(RwLock::new(None)),
+            workdir: Arc::new(RwLock::new(Workdir::new("mcp-session").unwrap_or_else(|_| Workdir::new("fallback").unwrap()))),
             tool_router: Self::tool_router(),
         }
     }
@@ -214,7 +211,7 @@ impl StellarioServer {
     }
 
     /// Load a project capsule into the session.
-    #[tool(name = "load_capsule", description = "Load a project capsule by name (from list_capsules). Must be called before write/show/search/lineage.")]
+    #[tool(name = "load_capsule", description = "Load a project capsule by name (from list_capsules). Must be called before expand/search/lineage.")]
     async fn load_capsule(
         &self,
         Parameters(LoadCapsuleParams { name }): Parameters<LoadCapsuleParams>,
@@ -273,63 +270,90 @@ impl StellarioServer {
     }
 
     /// Append a version with intent. Persists to disk. Requires load_capsule + select_identity.
-    #[tool(name = "write", description = "Write a memory entry (new or revision) with a required intent. Persists immediately. Requires load_capsule + select_identity first.")]
-    async fn write(
+    /// Expand an entry to a .md file for editing. Auto-syncs unsaved changes first.
+    /// Returns the file path — edit it with your file tools, then sync to ingest.
+    #[tool(name = "expand", description = "Expand an entry to an editable .md file. Returns the file path. Edit the file with Read/Edit, then call sync (or just expand another entry — sync is automatic). Requires load_capsule.")]
+    async fn expand(
         &self,
-        Parameters(WriteParams { volume, target_id, content, tags, keywords, intent }): Parameters<WriteParams>,
+        Parameters(ExpandParams { id }): Parameters<ExpandParams>,
     ) -> Result<String, String> {
+        // Auto-sync before expanding (don't lose unsaved edits).
+        self.do_sync().await;
+
+        let (volume, ordinal) = id.split_once(':')
+            .ok_or("id must be volume:n format, e.g. meta:03")?;
+
+        let cap = self.capsule.read().await;
+        let loaded = cap.as_ref().ok_or("no capsule loaded — call load_capsule first")?;
+        let entry = loaded.storage.materialize(volume, ordinal).map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("entry {} not found", id))?;
+        drop(cap);
+
+        let path = self.workdir.write().await.expand(&entry).map_err(|e| e.to_string())?;
+        Ok(js(serde_json::json!({
+            "id": id,
+            "file": path.to_string_lossy(),
+        })))
+    }
+
+    /// Expand a blank template for a new entry.
+    #[tool(name = "expand_new", description = "Create a blank .md template for a new entry. Returns the file path. Fill it in, then sync.")]
+    async fn expand_new(
+        &self,
+        Parameters(ExpandNewParams { volume, id_hint }): Parameters<ExpandNewParams>,
+    ) -> Result<String, String> {
+        self.do_sync().await;
+        let hint = id_hint.unwrap_or_else(|| "new".to_string());
+        let path = self.workdir.write().await.expand_new(&volume, &hint).map_err(|e| e.to_string())?;
+        Ok(js(serde_json::json!({
+            "volume": volume,
+            "file": path.to_string_lossy(),
+        })))
+    }
+
+    /// Internal: sync workdir changes into the capsule + persist. Returns results.
+    async fn do_sync(&self) -> Vec<(String, String)> {
         let author = self.identity.read().await.as_ref()
             .map(|i| i.instance.clone())
-            .ok_or("no identity selected — call select_identity first")?;
+            .unwrap_or_else(|| "anonymous".to_string());
 
-        let (id, hash) = {
+        let results = {
             let mut cap_guard = self.capsule.write().await;
-            let loaded = cap_guard.as_mut()
-                .ok_or("no capsule loaded — call load_capsule first")?;
+            let Some(loaded) = cap_guard.as_mut() else { return vec![] };
             let mut storage = std::mem::replace(&mut loaded.storage, AutomergeStorage::new());
-            let result = storage.write(&volume, target_id.as_deref(), &content, &tags, &keywords, &author, &intent, &[], &[]);
+            let mut wd = self.workdir.write().await;
+            let sync_result = wd.sync(&mut storage, &author);
             loaded.storage = storage;
-            result.map_err(|e| e.to_string())?
+            match sync_result {
+                Ok(r) => r.into_iter().map(|(id, action)| (id, action.to_string())).collect(),
+                Err(_) => vec![],
+            }
         };
 
-        // Persist to disk.
-        {
-            let cap_guard = self.capsule.write().await;
-            if cap_guard.is_some() {
-                drop(cap_guard);
-                // persist_capsule needs a &Arc<RwLock<LoadedCapsule>>, but our
-                // capsule is Option<LoadedCapsule>. We persist by reconstructing.
-                let mut guard = self.capsule.write().await;
-                if let Some(loaded) = guard.as_mut() {
-                    let mut storage = std::mem::replace(&mut loaded.storage, AutomergeStorage::new());
-                    let result = storage.save();
-                    loaded.storage = storage;
-                    if let Ok(bytes) = result {
-                        let path = loaded.path.clone();
-                        drop(guard);
-                        let _ = std::fs::write(&path, &bytes);
-                    }
+        // Persist if anything changed.
+        if results.iter().any(|(_, a)| a == "revised" || a == "created") {
+            let mut cap_guard = self.capsule.write().await;
+            if let Some(loaded) = cap_guard.as_mut() {
+                let mut storage = std::mem::replace(&mut loaded.storage, AutomergeStorage::new());
+                let save_result = storage.save();
+                loaded.storage = storage;
+                if let Ok(bytes) = save_result {
+                    let path = loaded.path.clone();
+                    drop(cap_guard);
+                    let _ = std::fs::write(&path, &bytes);
                 }
             }
         }
 
-        Ok(js(serde_json::json!({
-            "id": format!("{}:{}", volume, id),
-            "hash": hash,
-        })))
+        results
     }
 
-    /// Read an entry's current state.
-    #[tool(name = "show", description = "Read an entry by volume and id. Returns the latest active (non-superseded) version.")]
-    async fn show(
-        &self,
-        Parameters(ShowParams { volume, id }): Parameters<ShowParams>,
-    ) -> Result<String, String> {
-        let cap = self.capsule.read().await;
-        let loaded = cap.as_ref().ok_or("no capsule loaded — call load_capsule first")?;
-        let entry = loaded.storage.materialize(&volume, &id).map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("entry {}:{} not found", volume, id))?;
-        Ok(js(serde_json::to_value(&entry).map_err(|e| e.to_string())?))
+    /// Sync: ingest all changed workdir files as new versions. Persists capsule.
+    /// Called automatically before every expand; call manually to commit edits.
+    #[tool(name = "sync", description = "Ingest changed .md files from the workdir into the capsule as new versions. Persists to disk. This is how edits become permanent — edit the .md file, then sync. There is no separate write or commit verb.")]
+    async fn sync_tool(&self) -> Result<String, String> {
+        let results = self.do_sync().await;
+        Ok(js(serde_json::json!(results)))
     }
 
     /// Telescope hybrid search.
