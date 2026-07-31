@@ -41,6 +41,34 @@ struct ExpandedEntry {
     path: PathBuf,
 }
 
+/// Result of syncing one workdir file.
+#[derive(Debug, Clone)]
+pub struct SyncResult {
+    pub id: String,
+    pub action: SyncAction,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SyncAction {
+    Created { assigned_id: String },
+    Revised,
+    Unchanged,
+    Deleted,
+    SkippedTemplate,
+}
+
+impl SyncAction {
+    pub fn label(&self) -> &'static str {
+        match self {
+            SyncAction::Created { .. } => "created",
+            SyncAction::Revised => "revised",
+            SyncAction::Unchanged => "unchanged",
+            SyncAction::Deleted => "deleted",
+            SyncAction::SkippedTemplate => "skipped (template)",
+        }
+    }
+}
+
 impl Workdir {
     /// Create a session workdir under the system temp dir.
     pub fn new(session_id: &str) -> Result<Self> {
@@ -77,7 +105,7 @@ impl Workdir {
         let id = format!("{}:{}", volume, ordinal_hint);
         let path = self.root.join(format!("{}.md", id));
         let template = format!(
-            "# {id}\n\n<!-- Edit below. First line starting with ## becomes the title. -->\n<!-- Tags: comma-separated, e.g. type:design, module:auth -->\n<!-- Keywords: comma-separated -->\n\n## Title\n\nWrite content here.\n",
+            "# {id}\n\n<!-- Edit below. First line starting with ## becomes the title. -->\n<!-- Tags: comma-separated, e.g. type:design, module:auth -->\n<!-- Keywords: comma-separated -->\n<!-- intent: why are you creating this? (required for provenance) -->\n\n## Title\n\nWrite content here.\n",
             id = id
         );
         fs::write(&path, &template)?;
@@ -96,7 +124,7 @@ impl Workdir {
 
     /// Sync all expanded files: diff each against its source, ingest changed ones.
     /// Returns a list of (id, action) where action is "written" or "unchanged".
-    pub fn sync<S: Storage + ?Sized>(&mut self, storage: &mut S, author: &str) -> Result<Vec<(String, &'static str)>> {
+    pub fn sync<S: Storage + ?Sized>(&mut self, storage: &mut S, author: &str) -> Result<Vec<SyncResult>> {
         let mut results = Vec::new();
         // Collect the IDs first to avoid borrowing self during the loop.
         let ids: Vec<String> = self.expanded.keys().cloned().collect();
@@ -108,37 +136,38 @@ impl Workdir {
             let file_content = match fs::read_to_string(&exp.path) {
                 Ok(c) => c,
                 Err(_) => {
-                    // File was deleted — skip (or could mean "forget").
-                    results.push((id, "deleted"));
+                    results.push(SyncResult { id, action: SyncAction::Deleted });
                     continue;
                 }
             };
 
-            // Parse the md back into (content, tags, keywords).
             let (content, tags, keywords) = parse_entry_md(&file_content);
 
             if exp.source_hash.is_empty() {
-                // New entry — write it.
-                let intent = format!("new entry {}", id);
-                storage.write(&exp.volume, None, &content, &tags, &keywords, author, &intent, &[], &[])?;
-                // Clean up: remove the .md file after successful ingest.
-                let _ = fs::remove_file(&exp.path);
-                self.expanded.remove(&id);
-                results.push((id, "created"));
-            } else {
-                // Existing entry — check if content changed.
-                let new_hash = crate::model::Version::compute_hash(&content, &tags, &keywords);
-                if new_hash == exp.source_hash {
-                    results.push((id, "unchanged"));
+                // New entry — skip if it's still the unedited template.
+                if is_untouched_template(&content) {
+                    results.push(SyncResult { id, action: SyncAction::SkippedTemplate });
                     continue;
                 }
-                // Changed — write new version. Intent is auto-generated.
-                let intent = auto_intent(&file_content, &exp.source_hash);
-                storage.write(&exp.volume, Some(&exp.ordinal), &content, &tags, &keywords, author, &intent, &[], &[])?;
-                // Clean up: remove the .md file after successful ingest.
+                let intent = extract_intent(&file_content).unwrap_or_else(|| format!("new entry {}", id));
+                let (assigned_id, _) = storage.write(&exp.volume, None, &content, &tags, &keywords, author, &intent, &[], &[])?;
                 let _ = fs::remove_file(&exp.path);
                 self.expanded.remove(&id);
-                results.push((id, "revised"));
+                results.push(SyncResult {
+                    id,
+                    action: SyncAction::Created { assigned_id: format!("{}:{}", exp.volume, assigned_id) },
+                });
+            } else {
+                let new_hash = crate::model::Version::compute_hash(&content, &tags, &keywords);
+                if new_hash == exp.source_hash {
+                    results.push(SyncResult { id, action: SyncAction::Unchanged });
+                    continue;
+                }
+                let intent = extract_intent(&file_content).unwrap_or_else(|| auto_intent(&file_content, &exp.source_hash));
+                storage.write(&exp.volume, Some(&exp.ordinal), &content, &tags, &keywords, author, &intent, &[], &[])?;
+                let _ = fs::remove_file(&exp.path);
+                self.expanded.remove(&id);
+                results.push(SyncResult { id, action: SyncAction::Revised });
             }
         }
         Ok(results)
@@ -267,8 +296,30 @@ fn parse_entry_md(raw: &str) -> (String, Vec<String>, Vec<String>) {
 /// Auto-generate an intent from the edit. Since we don't have a diff library
 /// handy, we use a simple heuristic: the first changed line.
 fn auto_intent(_raw: &str, _source_hash: &str) -> String {
-    // TODO: line-level diff for a meaningful intent. For now, a generic one.
     "edited via workdir".to_string()
+}
+
+/// Check if a new-entry file is still the unedited template.
+fn is_untouched_template(content: &str) -> bool {
+    // The template body is "## Title\n\nWrite content here."
+    content.trim() == "## Title\n\nWrite content here." || content.trim().is_empty()
+}
+
+/// Extract an intent from an <!-- intent: ... --> comment in the .md file.
+/// Falls back to None if not present.
+fn extract_intent(raw: &str) -> Option<String> {
+    for line in raw.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("<!-- intent:") {
+            if let Some(val) = rest.strip_suffix("-->") {
+                let v = val.trim();
+                if !v.is_empty() {
+                    return Some(v.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -303,7 +354,7 @@ mod tests {
         // Sync — should detect the change and write a new version.
         let results = wd.sync(&mut storage, "agent").unwrap();
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].1, "revised");
+        assert_eq!(results[0].action, SyncAction::Revised);
 
         // Verify: materialize now returns the new content.
         let updated = storage.materialize("meta", "1").unwrap().unwrap();
@@ -322,7 +373,7 @@ mod tests {
         fs::write(&path, edited).unwrap();
 
         let results = wd.sync(&mut storage, "agent").unwrap();
-        assert_eq!(results[0].1, "created");
+        assert_eq!(results[0].action, SyncAction::Created { assigned_id: "meta:1".into() });
 
         let entry = storage.materialize("meta", "1").unwrap().unwrap();
         assert!(entry.content.contains("brand new content"));
@@ -338,6 +389,6 @@ mod tests {
         wd.expand(&entry).unwrap(); // no edit
 
         let results = wd.sync(&mut storage, "a").unwrap();
-        assert_eq!(results[0].1, "unchanged");
+        assert_eq!(results[0].action, SyncAction::Unchanged);
     }
 }

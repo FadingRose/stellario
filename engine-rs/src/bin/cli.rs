@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
 
-use stellario::{AutomergeStorage, SearchParams, Storage, search};
+use stellario::{AutomergeStorage, Edge, EdgeKind, SearchParams, Storage, Workdir, search};
 
 const USAGE_GUIDE: &str = "\
 USAGE GUIDE
@@ -113,6 +113,15 @@ enum Cmd {
     Sync {
         #[arg(short = 'a', long)]
         author: String,
+    },
+    /// Delete an entry (supersede to tombstone). Disappears from search, stays in lineage.
+    Delete {
+        /// Entry id (volume:n).
+        id: String,
+        #[arg(short = 'a', long)]
+        author: String,
+        #[arg(short = 'i', long, default_value = "deleted")]
+        intent: String,
     },
 }
 
@@ -333,10 +342,42 @@ fn main() -> Result<()> {
             if results.is_empty() {
                 println!("nothing to sync");
             } else {
-                for (id, action) in &results {
-                    println!("  {}  {}", id, action);
+                for r in &results {
+                    match &r.action {
+                        stellario::SyncAction::Created { assigned_id } => {
+                            println!("  {} → {}  created", r.id, assigned_id);
+                        }
+                        _ => {
+                            println!("  {}  {}", r.id, r.action.label());
+                        }
+                    }
                 }
             }
+        }
+
+        Cmd::Delete { id, author, intent } => {
+            let capsule_name = resolve_capsule_name(&cli);
+            let path = project_capsule_path(&capsule_name)
+                .ok_or_else(|| anyhow!("capsule '{}' not found", capsule_name))?;
+            let bytes = std::fs::read(&path)?;
+            let mut storage = AutomergeStorage::load(&bytes)?;
+            let (vol, n) = parse_id(&id)?;
+            let entry = storage.materialize(&vol, &n)?
+                .ok_or_else(|| anyhow!("{} not found", id))?;
+            let supersede_edge = Edge {
+                from: String::new(),
+                to: entry.hash.clone(),
+                kind: EdgeKind::Supersede,
+                reason: intent.clone(),
+            };
+            storage.write(
+                &vol, Some(&n),
+                "(deleted)", &["type:deleted".to_string()], &[],
+                &author, &intent, &[], &[supersede_edge],
+            )?;
+            let new_bytes = storage.save()?;
+            std::fs::write(&path, &new_bytes)?;
+            println!("deleted: {} (superseded, stays in lineage)", id);
         }
     }
 
@@ -355,10 +396,13 @@ fn auto_sync_if_needed(cli: &Cli) -> anyhow::Result<()> {
     let bytes = std::fs::read(&path)?;
     let mut storage = AutomergeStorage::load(&bytes)?;
     let results = wd.sync(&mut storage, "cli-auto")?;
-    if results.iter().any(|(_, a)| a == &"revised" || a == &"created") {
+    let changed: Vec<_> = results.iter().filter(|r| {
+        matches!(r.action, stellario::SyncAction::Created { .. } | stellario::SyncAction::Revised)
+    }).collect();
+    if !changed.is_empty() {
         let new_bytes = storage.save()?;
         std::fs::write(&path, &new_bytes)?;
-        eprintln!("auto-synced: {}", results.iter().map(|(id, a)| format!("{}={}", id, a)).collect::<Vec<_>>().join(", "));
+        eprintln!("auto-synced: {}", changed.iter().map(|r| format!("{}={}", r.id, r.action.label())).collect::<Vec<_>>().join(", "));
     }
     Ok(())
 }

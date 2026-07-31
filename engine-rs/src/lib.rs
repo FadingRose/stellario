@@ -21,4 +21,4 @@ pub use migrate::{migrate_project, MigrationOptions, MigrationReport};
 pub use model::{Edge, EdgeKind, Entry, MemRef, Version};
 pub use storage::{AutomergeStorage, LineageStep, Storage};
 pub use telescope::{search, SearchHit, SearchParams};
-pub use workdir::Workdir;
+pub use workdir::{SyncAction, Workdir};
