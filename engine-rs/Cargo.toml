@@ -39,6 +39,10 @@ path = "src/bin/migrate.rs"
 name = "stellario-mcp"
 path = "src/bin/mcp.rs"
 
+[[bin]]
+name = "stellario"
+path = "src/bin/cli.rs"
+
 [profile.release]
 # Smaller binaries for distribution.
 opt-level = "z"
