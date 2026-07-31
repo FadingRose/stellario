@@ -12,6 +12,7 @@ autosurgeon = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
+schemars = "1"
 # CLI / errors.
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
@@ -22,6 +23,9 @@ sha2 = "0.11"
 hex = "0.4"
 # Semantic search — same ONNX MiniLM weights as the TS pipeline (numerically equivalent).
 fastembed = "4"
+# MCP server (official SDK, stdio transport).
+rmcp = { version = "3", features = ["server", "transport-io"] }
+tokio = { version = "1", features = ["full"] }
 
 [lib]
 name = "stellario"
@@ -30,6 +34,10 @@ path = "src/lib.rs"
 [[bin]]
 name = "stellario-migrate"
 path = "src/bin/migrate.rs"
+
+[[bin]]
+name = "stellario-mcp"
+path = "src/bin/mcp.rs"
 
 [profile.release]
 # Smaller binaries for distribution.
