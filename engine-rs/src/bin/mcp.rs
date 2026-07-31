@@ -208,9 +208,9 @@ impl StellarioServer {
 
     /// Discover available project capsules.
     #[tool(name = "list_capsules", description = "List available project capsules you can load. Call this first to see what's available.")]
-    async fn list_capsules(&self) -> Result<Json<serde_json::Value>, String> {
+    async fn list_capsules(&self) -> Result<String, String> {
         let names = discover_capsules();
-        Ok(Json(serde_json::json!(names)))
+        Ok(js(serde_json::json!(names)))
     }
 
     /// Load a project capsule into the session.
@@ -218,14 +218,14 @@ impl StellarioServer {
     async fn load_capsule(
         &self,
         Parameters(LoadCapsuleParams { name }): Parameters<LoadCapsuleParams>,
-    ) -> Result<Json<serde_json::Value>, String> {
+    ) -> Result<String, String> {
         let path = project_capsule_path(&name)
             .ok_or_else(|| format!("no capsule found for project '{}'", name))?;
         let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
         let storage = AutomergeStorage::load(&bytes).map_err(|e| e.to_string())?;
         let vol_count = storage.volume_names().unwrap_or_default().len();
         *self.capsule.write().await = Some(LoadedCapsule { storage, path: path.clone() });
-        Ok(Json(serde_json::json!({
+        Ok(js(serde_json::json!({
             "loaded": name,
             "volumes": vol_count,
         })))
@@ -236,14 +236,14 @@ impl StellarioServer {
     async fn select_identity(
         &self,
         Parameters(SelectIdentityParams { name }): Parameters<SelectIdentityParams>,
-    ) -> Result<Json<serde_json::Value>, String> {
+    ) -> Result<String, String> {
         let global = self.global.read().await;
         let resolved = select_identity(&global.storage, &name).map_err(|e| e.to_string())?;
         let meta = resolved.meta.clone();
         let display = resolved.display.clone();
         let instance = resolved.instance.clone();
         *self.identity.write().await = Some(resolved);
-        Ok(Json(serde_json::json!({
+        Ok(js(serde_json::json!({
             "identity": instance,
             "display": display,
             "meta": meta,
@@ -255,7 +255,7 @@ impl StellarioServer {
     async fn register_identity(
         &self,
         Parameters(RegisterIdentityParams { name, display, description }): Parameters<RegisterIdentityParams>,
-    ) -> Result<Json<serde_json::Value>, String> {
+    ) -> Result<String, String> {
         let (id, hash) = {
             let mut global = self.global.write().await;
             let mut storage = std::mem::replace(&mut global.storage, AutomergeStorage::new());
@@ -265,7 +265,7 @@ impl StellarioServer {
         };
         // Persist global capsule to disk.
         persist_capsule(&self.global).await;
-        Ok(Json(serde_json::json!({
+        Ok(js(serde_json::json!({
             "id": format!("identity:{}", id),
             "hash": hash,
             "registered": name,
@@ -277,7 +277,7 @@ impl StellarioServer {
     async fn write(
         &self,
         Parameters(WriteParams { volume, target_id, content, tags, keywords, intent }): Parameters<WriteParams>,
-    ) -> Result<Json<serde_json::Value>, String> {
+    ) -> Result<String, String> {
         let author = self.identity.read().await.as_ref()
             .map(|i| i.instance.clone())
             .ok_or("no identity selected — call select_identity first")?;
@@ -313,7 +313,7 @@ impl StellarioServer {
             }
         }
 
-        Ok(Json(serde_json::json!({
+        Ok(js(serde_json::json!({
             "id": format!("{}:{}", volume, id),
             "hash": hash,
         })))
@@ -324,12 +324,12 @@ impl StellarioServer {
     async fn show(
         &self,
         Parameters(ShowParams { volume, id }): Parameters<ShowParams>,
-    ) -> Result<Json<serde_json::Value>, String> {
+    ) -> Result<String, String> {
         let cap = self.capsule.read().await;
         let loaded = cap.as_ref().ok_or("no capsule loaded — call load_capsule first")?;
         let entry = loaded.storage.materialize(&volume, &id).map_err(|e| e.to_string())?
             .ok_or_else(|| format!("entry {}:{} not found", volume, id))?;
-        Ok(Json(serde_json::to_value(&entry).map_err(|e| e.to_string())?))
+        Ok(js(serde_json::to_value(&entry).map_err(|e| e.to_string())?))
     }
 
     /// Telescope hybrid search.
@@ -337,7 +337,7 @@ impl StellarioServer {
     async fn search(
         &self,
         Parameters(SearchParamsMcp { query, volumes, tags, tags_any, tags_not, limit }): Parameters<SearchParamsMcp>,
-    ) -> Result<Json<serde_json::Value>, String> {
+    ) -> Result<String, String> {
         let cap = self.capsule.read().await;
         let loaded = cap.as_ref().ok_or("no capsule loaded — call load_capsule first")?;
         let params = SearchParams { query, volumes, tags, tags_any, tags_not, limit, no_semantic: false };
@@ -348,7 +348,7 @@ impl StellarioServer {
             "title": extract_title(&h.entry.content),
             "tags": h.entry.tags,
         })).collect();
-        Ok(Json(serde_json::json!(results)))
+        Ok(js(serde_json::json!(results)))
     }
 
     /// Version+intent timeline for one entry.
@@ -356,7 +356,7 @@ impl StellarioServer {
     async fn lineage(
         &self,
         Parameters(LineageParams { volume, id }): Parameters<LineageParams>,
-    ) -> Result<Json<serde_json::Value>, String> {
+    ) -> Result<String, String> {
         let cap = self.capsule.read().await;
         let loaded = cap.as_ref().ok_or("no capsule loaded — call load_capsule first")?;
         let steps = loaded.storage.lineage(&volume, &id).map_err(|e| e.to_string())?;
@@ -367,7 +367,7 @@ impl StellarioServer {
             "author": s.version.author,
             "created": s.version.created,
         })).collect();
-        Ok(Json(serde_json::json!(timeline)))
+        Ok(js(serde_json::json!(timeline)))
     }
 }
 
@@ -390,6 +390,12 @@ async fn persist_capsule(lock: &Arc<RwLock<LoadedCapsule>>) {
         drop(guard);
         let _ = std::fs::write(&path, &bytes);
     }
+}
+
+
+/// Serialize a json value to a string (for MCP text content blocks).
+fn js(v: serde_json::Value) -> String {
+    serde_json::to_string(&v).unwrap_or_else(|_| "{}".into())
 }
 
 fn extract_title(content: &str) -> String {
