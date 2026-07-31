@@ -224,7 +224,7 @@ pub fn migrate_project(device_dir: &Path, opts: &MigrationOptions) -> Result<Mig
         // Task-tree relations become knowledge-graph refs.
         let mut refs: Vec<MemRef> = Vec::new();
         {
-            let mut push_ref = |refs: &mut Vec<MemRef>, raw: &str, reason: &str| {
+            let push_ref = |refs: &mut Vec<MemRef>, raw: &str, reason: &str| {
                 if let Some(target) = resolver.resolve(raw) {
                     refs.push(MemRef {
                         target,

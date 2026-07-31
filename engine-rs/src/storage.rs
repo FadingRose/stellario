@@ -87,6 +87,9 @@ pub trait Storage {
     /// adds full semantic search later).
     fn find_by_tag(&self, volume: &str, tags: &[String]) -> Result<Vec<Entry>>;
 
+    /// List all volume names present in the capsule.
+    fn volume_names(&self) -> Result<Vec<String>>;
+
     /// Save the document to bytes (for git transport).
     fn save(&mut self) -> Result<Vec<u8>>;
 }
@@ -516,6 +519,13 @@ impl Storage for AutomergeStorage {
             }
         }
         Ok(out)
+    }
+
+    fn volume_names(&self) -> Result<Vec<String>> {
+        let Some((_, volumes_map)) = self.doc.get(automerge::ROOT, "volumes")? else {
+            return Ok(vec![]);
+        };
+        Ok(self.doc.keys(&volumes_map).collect())
     }
 }
 

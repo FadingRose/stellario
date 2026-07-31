@@ -13,8 +13,10 @@ pub mod identity;
 pub mod migrate;
 pub mod model;
 pub mod storage;
+pub mod telescope;
 
 pub use identity::{author_for, list_identities, register_identity, select_identity, ResolvedIdentity};
 pub use migrate::{migrate_project, MigrationOptions, MigrationReport};
 pub use model::{Edge, EdgeKind, Entry, MemRef, Version};
 pub use storage::{AutomergeStorage, LineageStep, Storage};
+pub use telescope::{search, SearchHit, SearchParams};

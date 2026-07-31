@@ -20,6 +20,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # Content-addressing for versions (volume:id:hash).
 sha2 = "0.11"
 hex = "0.4"
+# Semantic search — same ONNX MiniLM weights as the TS pipeline (numerically equivalent).
+fastembed = "4"
 
 [lib]
 name = "stellario"

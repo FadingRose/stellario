@@ -15,3 +15,6 @@ engine-rs/target/
 
 # Local session/agent data
 .zcode/
+
+# fastembed model cache (downloaded on first semantic search)
+engine-rs/.fastembed_cache/
