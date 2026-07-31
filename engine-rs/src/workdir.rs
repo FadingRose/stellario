@@ -121,10 +121,9 @@ impl Workdir {
                 // New entry — write it.
                 let intent = format!("new entry {}", id);
                 storage.write(&exp.volume, None, &content, &tags, &keywords, author, &intent, &[], &[])?;
-                // Update source_hash so a re-sync doesn't re-ingest.
-                if let Some(e) = self.expanded.get_mut(&id) {
-                    e.source_hash = crate::model::Version::compute_hash(&content, &tags, &keywords);
-                }
+                // Clean up: remove the .md file after successful ingest.
+                let _ = fs::remove_file(&exp.path);
+                self.expanded.remove(&id);
                 results.push((id, "created"));
             } else {
                 // Existing entry — check if content changed.
@@ -136,10 +135,9 @@ impl Workdir {
                 // Changed — write new version. Intent is auto-generated.
                 let intent = auto_intent(&file_content, &exp.source_hash);
                 storage.write(&exp.volume, Some(&exp.ordinal), &content, &tags, &keywords, author, &intent, &[], &[])?;
-                // Update source_hash so a re-sync doesn't re-ingest.
-                if let Some(e) = self.expanded.get_mut(&id) {
-                    e.source_hash = new_hash;
-                }
+                // Clean up: remove the .md file after successful ingest.
+                let _ = fs::remove_file(&exp.path);
+                self.expanded.remove(&id);
                 results.push((id, "revised"));
             }
         }
@@ -151,6 +149,52 @@ impl Workdir {
         self.expanded.iter()
             .map(|(id, e)| (id.clone(), e.path.clone()))
             .collect()
+    }
+
+    /// Re-discover expanded entries by scanning the workdir for .md files.
+    /// Each .md file has a `<!-- hash: ... -->` comment carrying the source
+    /// version hash, and a `# volume:id` first line. This makes the workdir
+    /// stateless across processes (CLI's model) — the files ARE the state.
+    pub fn discover_from_disk(&mut self) -> Result<()> {
+        if !self.root.exists() {
+            return Ok(());
+        }
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if !name.ends_with(".md") {
+                continue;
+            }
+            let id = name.trim_end_matches(".md").to_string();
+            let content = fs::read_to_string(&path).unwrap_or_default();
+
+            // Extract source_hash from <!-- hash: ... --> comment.
+            let source_hash = content
+                .lines()
+                .find_map(|line| {
+                    let line = line.trim();
+                    line.strip_prefix("<!-- hash:")
+                        .and_then(|r| r.strip_suffix("-->"))
+                        .map(|s| s.trim().to_string())
+                })
+                .unwrap_or_default();
+
+            let (volume, ordinal) = id.split_once(':').unwrap_or(("unknown", "0"));
+            self.expanded.insert(
+                id.clone(),
+                ExpandedEntry {
+                    id: id.clone(),
+                    volume: volume.to_string(),
+                    ordinal: ordinal.to_string(),
+                    source_hash,
+                    path,
+                },
+            );
+        }
+        Ok(())
     }
 }
 

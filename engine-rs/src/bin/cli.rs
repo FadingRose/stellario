@@ -71,6 +71,24 @@ enum Cmd {
     Lineage { id: String },
     /// List volumes in a capsule.
     Volumes,
+    /// Expand an entry to an editable .md file. Edit the file, then sync.
+    Expand {
+        /// Entry id (volume:n, e.g. meta:03).
+        id: String,
+    },
+    /// Create a blank .md template for a new entry.
+    ExpandNew {
+        /// Volume for the new entry.
+        volume: String,
+        /// Optional id hint.
+        #[arg(long)]
+        id_hint: Option<String>,
+    },
+    /// Sync: ingest changed .md files from the workdir. Use --author for provenance.
+    Sync {
+        #[arg(short = 'a', long)]
+        author: String,
+    },
 }
 
 fn stellario_root() -> PathBuf {
@@ -251,7 +269,88 @@ fn main() -> Result<()> {
                 println!("     created: {}", s.version.created);
             }
         }
+
+        Cmd::Expand { id } => {
+            // Auto-sync before expand (don't lose unsaved edits).
+            auto_sync_if_needed(&cli)?;
+            let (_name, storage) = load_capsule(cli.capsule.as_deref())?;
+            let (vol, n) = parse_id(&id)?;
+            let entry = storage
+                .materialize(&vol, &n)?
+                .ok_or_else(|| anyhow!("{} not found", id))?;
+            let mut wd = stellario::Workdir::new("cli")?;
+            let path = wd.expand(&entry)?;
+            // Save the workdir tracking state for sync to pick up.
+            save_workdir_state(&wd, &cli)?;
+            println!("{}", path.display());
+        }
+
+        Cmd::ExpandNew { volume, id_hint } => {
+            auto_sync_if_needed(&cli)?;
+            let mut wd = stellario::Workdir::new("cli")?;
+            let hint = id_hint.clone().unwrap_or_else(|| "new".to_string());
+            let path = wd.expand_new(&volume, &hint)?;
+            save_workdir_state(&wd, &cli)?;
+            println!("{}", path.display());
+        }
+
+        Cmd::Sync { author } => {
+            let capsule_name = resolve_capsule_name(&cli);
+            let path = project_capsule_path(&capsule_name)
+                .ok_or_else(|| anyhow!("capsule '{}' not found", capsule_name))?;
+            let bytes = std::fs::read(&path)?;
+            let mut storage = AutomergeStorage::load(&bytes)?;
+            let mut wd = stellario::Workdir::new("cli")?;
+            wd.discover_from_disk()?;
+            let results = wd.sync(&mut storage, author)?;
+            let new_bytes = storage.save()?;
+            std::fs::write(&path, &new_bytes)?;
+            if results.is_empty() {
+                println!("nothing to sync");
+            } else {
+                for (id, action) in &results {
+                    println!("  {}  {}", id, action);
+                }
+            }
+        }
     }
 
+    Ok(())
+}
+
+/// Auto-sync if there's a workdir with pending changes.
+fn auto_sync_if_needed(cli: &Cli) -> anyhow::Result<()> {
+    let mut wd = stellario::Workdir::new("cli")?;
+    wd.discover_from_disk()?;
+    let capsule_name = resolve_capsule_name(cli);
+    let path = match project_capsule_path(&capsule_name) {
+        Some(p) => p,
+        None => return Ok(()),
+    };
+    let bytes = std::fs::read(&path)?;
+    let mut storage = AutomergeStorage::load(&bytes)?;
+    let results = wd.sync(&mut storage, "cli-auto")?;
+    if results.iter().any(|(_, a)| a == &"revised" || a == &"created") {
+        let new_bytes = storage.save()?;
+        std::fs::write(&path, &new_bytes)?;
+        eprintln!("auto-synced: {}", results.iter().map(|(id, a)| format!("{}={}", id, a)).collect::<Vec<_>>().join(", "));
+    }
+    Ok(())
+}
+
+/// Resolve the capsule name (explicit or first available).
+fn resolve_capsule_name(cli: &Cli) -> String {
+    cli.capsule.clone().unwrap_or_else(|| {
+        discover_capsules().first().cloned().unwrap_or_default()
+    })
+}
+
+/// Workdir state is per-process (Workdir holds its tracking in memory).
+/// For CLI's stateless model, each expand creates a fresh Workdir that
+/// re-discovers .md files in the workdir root. sync scans all .md files there.
+fn save_workdir_state(_wd: &stellario::Workdir, _cli: &Cli) -> anyhow::Result<()> {
+    // The .md files themselves are the state — sync reads them from disk.
+    // No separate state file needed: sync re-derives source_hash from the
+    // <!-- hash: ... --> comment in each .md file.
     Ok(())
 }
