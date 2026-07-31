@@ -19,8 +19,33 @@ use clap::{Parser, Subcommand};
 
 use stellario::{AutomergeStorage, SearchParams, Storage, search};
 
+const USAGE_GUIDE: &str = "\
+USAGE GUIDE
+
+  Reading:
+    stellario list                                — discover capsules
+    stellario volumes --capsule NAME              — see volumes + counts
+    stellario search \"query\" --capsule NAME       — fzf + semantic search
+    stellario show meta:03 --capsule NAME         — read an entry
+    stellario lineage meta:03 --capsule NAME      — how it evolved (intent per version)
+
+  Writing (file-based editing — recommended):
+    stellario expand meta:03 --capsule NAME       — writes /tmp/.../meta:03.md
+    (edit the .md file with your editor or Edit tool)
+    stellario sync --capsule NAME --author ID     — ingest edits, cleans up .md
+    (sync auto-runs before every expand, so you rarely call it manually)
+
+  Writing (direct — for scripts/short content):
+    stellario write -v meta -c \"## Title\" -i \"why\" -a \"name:agent#hash\"
+
+  --capsule defaults to the first available. --author is name:name#instance.";
+
 #[derive(Parser)]
-#[command(name = "stellario", about = "Memory engine CLI")]
+#[command(
+    name = "stellario",
+    about = "Memory engine — version-graph storage with telescope hybrid search",
+    after_help = USAGE_GUIDE
+)]
 struct Cli {
     /// Project capsule to operate on (defaults to first available).
     #[arg(long, global = true)]
