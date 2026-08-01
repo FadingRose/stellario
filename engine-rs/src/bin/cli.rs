@@ -74,6 +74,9 @@ enum Cmd {
     /// Read an entry by volume:id (e.g. meta:63).
     Show { id: String },
     /// Write an entry. Requires intent.
+    ///
+    /// RETIRED (constellation model §4): authoring happens in editors as
+    /// files, not via API. Kept behind --dangerous for the transition.
     Write {
         #[arg(short = 'v', long)]
         volume: String,
@@ -91,6 +94,9 @@ enum Cmd {
         /// Revise an existing entry by id (e.g. "63").
         #[arg(long)]
         target_id: Option<String>,
+        /// Acknowledge create is retired and use it anyway.
+        #[arg(long)]
+        dangerous: bool,
     },
     /// View the version+intent timeline of an entry.
     Lineage { id: String },
@@ -102,12 +108,17 @@ enum Cmd {
         id: String,
     },
     /// Create a blank .md template for a new entry.
+    ///
+    /// RETIRED (constellation model §4): write a <slug>.stella file instead.
     ExpandNew {
         /// Volume for the new entry.
         volume: String,
         /// Optional id hint.
         #[arg(long)]
         id_hint: Option<String>,
+        /// Acknowledge create is retired and use it anyway.
+        #[arg(long)]
+        dangerous: bool,
     },
     /// Sync: ingest changed .md files from the workdir. Use --author for provenance.
     Sync {
@@ -124,6 +135,9 @@ enum Cmd {
         /// Index file (default ~/.stellario/index.db; env STELLA_INDEX overrides).
         #[arg(long)]
         index: Option<PathBuf>,
+        /// Print the constellation hygiene report for the repo's .stella/ dir.
+        #[arg(long)]
+        status: bool,
     },
     /// Delete an entry (supersede to tombstone). Disappears from search, stays in lineage.
     Delete {
@@ -275,7 +289,15 @@ fn main() -> Result<()> {
             keywords,
             author,
             target_id,
+            dangerous,
         } => {
+            if !dangerous {
+                eprintln!("create is retired (constellation model §4): authoring happens in editors as files.");
+                eprintln!("  site-free knowledge  → write a <slug>.stella native entry");
+                eprintln!("  drafts               → write a <slug>.<star> file in .stella/");
+                eprintln!("  use --dangerous to override during the transition.");
+                std::process::exit(2);
+            }
             let capsule_name = cli.capsule.clone().unwrap_or_else(|| {
                 discover_capsules().first().cloned().unwrap_or_default()
             });
@@ -330,7 +352,12 @@ fn main() -> Result<()> {
             println!("{}", path.display());
         }
 
-        Cmd::ExpandNew { volume, id_hint } => {
+        Cmd::ExpandNew { volume, id_hint, dangerous } => {
+            if !dangerous {
+                eprintln!("expand-new is retired (constellation model §4): write a <slug>.stella file directly.");
+                eprintln!("  use --dangerous to override during the transition.");
+                std::process::exit(2);
+            }
             auto_sync_if_needed(&cli)?;
             let mut wd = stellario::Workdir::new("cli")?;
             let hint = id_hint.clone().unwrap_or_else(|| "new".to_string());
@@ -339,7 +366,24 @@ fn main() -> Result<()> {
             println!("{}", path.display());
         }
 
-        Cmd::Sync { author, repo, reindex_memory, index } => {
+        Cmd::Sync { author, repo, reindex_memory, index, status } => {
+            if *status {
+                let cwd = std::env::current_dir()?;
+                let root = {
+                    let out = std::process::Command::new("git")
+                        .args(["rev-parse", "--show-toplevel"])
+                        .current_dir(&cwd)
+                        .output()?;
+                    if out.status.success() {
+                        PathBuf::from(String::from_utf8_lossy(&out.stdout).trim().to_string())
+                    } else {
+                        cwd
+                    }
+                };
+                let cons = stellario::constellation::discover(&root.join(".stella"));
+                print!("{}", stellario::constellation::format_report(&cons));
+                return Ok(());
+            }
             let index_path = index
                 .clone()
                 .or_else(|| std::env::var("STELLA_INDEX").ok().map(PathBuf::from))

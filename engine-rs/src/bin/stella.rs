@@ -167,13 +167,30 @@ fn run_query(index_path: &PathBuf, query: &str, intent: &str, kind: Option<Kind>
         println!("No matching entries found.");
         return Ok(());
     }
-    for (row, score) in hits {
+    for (row, score) in &hits {
         let loc = match row.kind {
             Kind::Repo => row.span.clone(),
             Kind::Memory => row.span.clone(),
         };
         println!("[{}] {}/{} {:.0} — {}", row.id, row.kind.as_str(), row.form.as_str(), score, row.title);
         println!("    {loc}");
+    }
+
+    // In-path constellation hygiene: side notes for repo-kind hits whose
+    // constellation has uncollected stars or a vacant head (§3.5).
+    let mut noted: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (row, _) in &hits {
+        if row.kind != Kind::Repo || !noted.insert(row.id.clone()) {
+            continue;
+        }
+        let dir = PathBuf::from(&row.source).join(".stella");
+        for cons in stellario::constellation::discover(&dir) {
+            if cons.slug == row.id {
+                if let Some(note) = stellario::constellation::side_note(&cons) {
+                    println!("  {note}");
+                }
+            }
+        }
     }
     Ok(())
 }
