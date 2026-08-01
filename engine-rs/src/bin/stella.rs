@@ -55,6 +55,14 @@ enum Cmd {
         #[arg(required = true)]
         paths: Vec<PathBuf>,
     },
+    /// Show one entry by id (slug for repo, volume:id for memory).
+    ///
+    /// Renders what the index holds and points at the authority: the file
+    /// span for repo entries, the capsule for memory entries.
+    Show {
+        /// Entry id. Exact match first; falls back to substring candidates.
+        id: String,
+    },
 }
 
 fn index_path(cli: &Cli) -> PathBuf {
@@ -162,8 +170,53 @@ fn run_query(index_path: &PathBuf, query: &str, intent: &str, kind: Option<Kind>
     Ok(())
 }
 
+fn run_show(index_path: &PathBuf, id: &str) -> Result<()> {
+    let idx = Index::open(index_path)?;
+    let all = idx.entries(None)?;
+
+    // Exact match first; then substring candidates (slugs are long, fingers are lazy).
+    let exact: Vec<&EntryRow> = all.iter().filter(|r| r.id == id).collect();
+    if exact.is_empty() {
+        let candidates: Vec<&EntryRow> = all.iter().filter(|r| r.id.contains(id)).take(5).collect();
+        if candidates.is_empty() {
+            println!("no entry with id {id:?}");
+        } else {
+            println!("no exact match for {id:?}. candidates:");
+            for c in candidates {
+                println!("  [{}] {} — {}", c.id, c.kind.as_str(), c.title);
+            }
+        }
+        return Ok(());
+    }
+
+    for row in exact {
+        println!("[{}] {}", row.id, row.kind.as_str());
+        println!("  source:   {}", row.source);
+        println!("  span:     {}", row.span);
+        println!("  tags:     {}", row.tags.join(", "));
+        println!("  keywords: {}", row.keywords.join(", "));
+        println!();
+        for line in row.content.lines() {
+            println!("  {line}");
+        }
+        println!();
+        match row.kind {
+            Kind::Repo => {
+                let file = row.span.split(':').next().unwrap_or("");
+                println!("  → authority: {file} (the block binds the prose beside it; the index is a copy, the file is the truth)");
+            }
+            Kind::Memory => {
+                println!("  → authority: capsule '{}' — `stellario show {} --capsule {}` for raw, `stellario lineage {} --capsule {}` for history",
+                    row.source, row.id, row.source, row.id, row.source);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    let idx_path = index_path(&cli);
     match cli.cmd {
         Some(Cmd::Lint { paths }) => {
             let report = stellario::lint::run(&paths)?;
@@ -173,6 +226,7 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Some(Cmd::Show { id }) => run_show(&idx_path, &id),
         None => match (&cli.query, &cli.intent) {
             (Some(q), Some(i)) => {
                 let kind = match (cli.repo, cli.memory) {
@@ -180,7 +234,7 @@ fn main() -> Result<()> {
                     (false, true) => Some(Kind::Memory),
                     _ => None,
                 };
-                run_query(&index_path(&cli), q, i, kind, cli.limit.unwrap_or(20))
+                run_query(&idx_path, q, i, kind, cli.limit.unwrap_or(20))
             }
             (Some(_), None) => {
                 eprintln!("intent is mandatory: stella <query> <intent> [--repo] [--memory]");
