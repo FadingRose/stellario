@@ -10,6 +10,7 @@
 //!   migrate  — JSONL → version-graph migration (phase-0 risk gate)
 
 pub mod identity;
+pub mod lint;
 pub mod migrate;
 pub mod model;
 pub mod storage;

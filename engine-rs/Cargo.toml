@@ -43,6 +43,10 @@ path = "src/bin/mcp.rs"
 name = "stellario"
 path = "src/bin/cli.rs"
 
+[[bin]]
+name = "stella"
+path = "src/bin/stella.rs"
+
 [profile.release]
 # Smaller binaries for distribution.
 opt-level = "z"
