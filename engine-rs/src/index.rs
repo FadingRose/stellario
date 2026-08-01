@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 
+use crate::parse::Form;
 use crate::storage::Storage;
 
 pub const EMBEDDING_DIM: usize = 384;
@@ -42,8 +43,10 @@ pub struct IndexEntry {
     pub content: String,
     pub tags: Vec<String>,
     pub keywords: Vec<String>,
-    /// repo: `path:start-end`; memory: `capsule`
+    /// repo: `path:start-end` or `path.stella`; memory: `capsule`
     pub span: String,
+    /// embed | native | star (memory entries are stored as native-shaped rows)
+    pub form: Form,
 }
 
 /// A row read back from the index.
@@ -51,6 +54,7 @@ pub struct IndexEntry {
 pub struct EntryRow {
     pub id: String,
     pub kind: Kind,
+    pub form: Form,
     pub source: String,
     pub span: String,
     pub title: String,
@@ -90,6 +94,7 @@ impl Index {
             "CREATE TABLE IF NOT EXISTS entries (
                 kind     TEXT NOT NULL,
                 id       TEXT NOT NULL,
+                form     TEXT NOT NULL DEFAULT 'embed',
                 source   TEXT NOT NULL,
                 span     TEXT NOT NULL,
                 title    TEXT NOT NULL,
@@ -101,6 +106,7 @@ impl Index {
             CREATE VIRTUAL TABLE IF NOT EXISTS keyword_vecs USING vec0(
                 embedding float[{EMBEDDING_DIM}],
                 +kind TEXT,
+                +form TEXT,
                 +entry_id TEXT,
                 +keyword TEXT
             );"
@@ -116,30 +122,66 @@ impl Index {
         source: &str,
         entries: &[(IndexEntry, Vec<(String, Vec<f32>)>)],
     ) -> Result<usize> {
-        // Collect ids of the old set, delete their vectors, then the rows.
         let mut stmt = self.conn.prepare("SELECT id FROM entries WHERE kind = ?1 AND source = ?2")?;
         let old_ids: Vec<String> = stmt
             .query_map(params![kind.as_str(), source], |r| r.get(0))?
             .collect::<rusqlite::Result<_>>()?;
         drop(stmt);
-        for id in &old_ids {
+        self.delete_entries(kind, &old_ids)?;
+        self.insert_entries(kind, source, entries)
+    }
+
+    /// Replace only the repo entries whose span falls under one of the
+    /// scanned prefixes — a partial harvest must not wipe sibling scans
+    /// from the same repo. Spans are root-relative paths.
+    pub fn replace_repo_scoped(
+        &self,
+        source: &str,
+        prefixes: &[String],
+        entries: &[(IndexEntry, Vec<(String, Vec<f32>)>)],
+    ) -> Result<usize> {
+        let mut stmt = self.conn.prepare("SELECT id, span FROM entries WHERE kind = 'repo' AND source = ?1")?;
+        let old: Vec<(String, String)> = stmt
+            .query_map(params![source], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(stmt);
+        let doomed: Vec<String> = old
+            .into_iter()
+            .filter(|(_, span)| prefixes.iter().any(|p| span == p || span.starts_with(&format!("{p}/"))))
+            .map(|(id, _)| id)
+            .collect();
+        self.delete_entries(Kind::Repo, &doomed)?;
+        self.insert_entries(Kind::Repo, source, entries)
+    }
+
+    fn delete_entries(&self, kind: Kind, ids: &[String]) -> Result<()> {
+        for id in ids {
             self.conn.execute(
                 "DELETE FROM keyword_vecs WHERE rowid IN (SELECT rowid FROM keyword_vecs WHERE kind = ?1 AND entry_id = ?2)",
                 params![kind.as_str(), id],
             )?;
+            self.conn.execute(
+                "DELETE FROM entries WHERE kind = ?1 AND id = ?2",
+                params![kind.as_str(), id],
+            )?;
         }
-        self.conn.execute(
-            "DELETE FROM entries WHERE kind = ?1 AND source = ?2",
-            params![kind.as_str(), source],
-        )?;
+        Ok(())
+    }
 
+    fn insert_entries(
+        &self,
+        kind: Kind,
+        source: &str,
+        entries: &[(IndexEntry, Vec<(String, Vec<f32>)>)],
+    ) -> Result<usize> {
         for (entry, vecs) in entries {
             self.conn.execute(
-                "INSERT OR REPLACE INTO entries (kind, id, source, span, title, content, tags, keywords)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                "INSERT OR REPLACE INTO entries (kind, id, form, source, span, title, content, tags, keywords)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     kind.as_str(),
                     entry.id,
+                    entry.form.as_str(),
                     source,
                     entry.span,
                     entry.title,
@@ -154,8 +196,8 @@ impl Index {
                 }
                 let blob: Vec<u8> = vec.iter().flat_map(|f| f.to_le_bytes()).collect();
                 self.conn.execute(
-                    "INSERT INTO keyword_vecs (embedding, kind, entry_id, keyword) VALUES (?1, ?2, ?3, ?4)",
-                    params![blob, kind.as_str(), entry.id, keyword],
+                    "INSERT INTO keyword_vecs (embedding, kind, form, entry_id, keyword) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![blob, kind.as_str(), entry.form.as_str(), entry.id, keyword],
                 )?;
             }
         }
@@ -165,21 +207,27 @@ impl Index {
     /// All rows of a kind (None = both kinds), for fzf scoring.
     pub fn entries(&self, kind: Option<Kind>) -> Result<Vec<EntryRow>> {
         let (sql, param): (&str, Option<&str>) = match kind {
-            Some(k) => ("SELECT kind, id, source, span, title, content, tags, keywords FROM entries WHERE kind = ?1", Some(k.as_str())),
-            None => ("SELECT kind, id, source, span, title, content, tags, keywords FROM entries", None),
+            Some(k) => ("SELECT kind, id, form, source, span, title, content, tags, keywords FROM entries WHERE kind = ?1", Some(k.as_str())),
+            None => ("SELECT kind, id, form, source, span, title, content, tags, keywords FROM entries", None),
         };
         let mut stmt = self.conn.prepare(sql)?;
         let map_row = |r: &rusqlite::Row| -> rusqlite::Result<EntryRow> {
             let kind_str: String = r.get(0)?;
-            let tags_json: String = r.get(6)?;
-            let kw_json: String = r.get(7)?;
+            let form_str: String = r.get(2)?;
+            let tags_json: String = r.get(7)?;
+            let kw_json: String = r.get(8)?;
             Ok(EntryRow {
                 kind: if kind_str == "repo" { Kind::Repo } else { Kind::Memory },
+                form: match form_str.as_str() {
+                    "native" => Form::Native,
+                    "star" => Form::Star,
+                    _ => Form::Embed,
+                },
                 id: r.get(1)?,
-                source: r.get(2)?,
-                span: r.get(3)?,
-                title: r.get(4)?,
-                content: r.get(5)?,
+                source: r.get(3)?,
+                span: r.get(4)?,
+                title: r.get(5)?,
+                content: r.get(6)?,
                 tags: serde_json::from_str(&tags_json).unwrap_or_default(),
                 keywords: serde_json::from_str(&kw_json).unwrap_or_default(),
             })
@@ -194,25 +242,28 @@ impl Index {
     /// KNN over keyword anchors. Returns (entry_id, keyword, cosine) with the
     /// best cosine per entry. vec0 distance is L2; for normalized vectors
     /// cos = 1 - d²/2 (fastembed MiniLM vectors are normalized).
-    pub fn knn(&self, query: &[f32], k: usize, kind: Option<Kind>) -> Result<Vec<(String, String, f64)>> {
+    pub fn knn(&self, query: &[f32], k: usize, kind: Option<Kind>, include_stars: bool) -> Result<Vec<(String, String, f64)>> {
         let blob: Vec<u8> = query.iter().flat_map(|f| f.to_le_bytes()).collect();
         // Over-fetch and filter in Rust — auxiliary-column WHERE support in
         // vec0 knn queries is version-dependent; keep it dumb.
         let fetch = k * 4 + 16;
         let mut stmt = self.conn.prepare(
-            "SELECT kind, entry_id, keyword, distance FROM keyword_vecs
+            "SELECT kind, form, entry_id, keyword, distance FROM keyword_vecs
              WHERE embedding MATCH ?1 AND k = ?2 ORDER BY distance",
         )?;
         let rows = stmt.query_map(params![blob, fetch as i64], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, f64>(3)?))
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get::<_, f64>(4)?))
         })?;
         let mut best: std::collections::HashMap<String, (String, f64)> = std::collections::HashMap::new();
         for row in rows {
-            let (k_str, entry_id, keyword, dist) = row?;
+            let (k_str, f_str, entry_id, keyword, dist) = row?;
             if let Some(want) = kind {
                 if k_str != want.as_str() {
                     continue;
                 }
+            }
+            if !include_stars && f_str == "star" {
+                continue;
             }
             let cosine = (1.0 - dist * dist / 2.0).max(0.0);
             best.entry(entry_id)
@@ -259,6 +310,7 @@ pub fn ingest_memory<S: Storage + ?Sized>(
                 tags: entry.tags.clone(),
                 keywords: entry.keywords.clone(),
                 span: capsule.to_string(),
+                form: Form::Native,
             });
             all_keywords.extend(entry.keywords.clone());
         }
@@ -313,6 +365,7 @@ mod tests {
             tags: vec!["module:test".into()],
             keywords: kws.iter().map(|s| s.to_string()).collect(),
             span: "src/t.rs:1-5".into(),
+            form: Form::Embed,
         }
     }
 
@@ -352,16 +405,33 @@ mod tests {
         assert_eq!(rows[0].id, "delta-epsilon-zeta");
 
         // knn near basis_vec(2) should hit delta's "render" keyword.
-        let hits = idx.knn(&basis_vec(2), 5, Some(Kind::Repo)).unwrap();
+        let hits = idx.knn(&basis_vec(2), 5, Some(Kind::Repo), true).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].0, "delta-epsilon-zeta");
         assert_eq!(hits[0].1, "render");
         assert!(hits[0].2 > 0.99, "cosine should be ~1: {}", hits[0].2);
 
         // knn for the removed entry's keyword should miss.
-        let hits = idx.knn(&basis_vec(0), 5, Some(Kind::Repo)).unwrap();
+        let hits = idx.knn(&basis_vec(0), 5, Some(Kind::Repo), true).unwrap();
         assert!(hits.is_empty() || hits[0].2 < 0.99, "deleted vectors must be gone: {hits:?}");
 
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn scoped_replace_keeps_siblings() {
+        let (path, idx) = test_index("scoped");
+        let core_entry = IndexEntry { span: "core/iris/a.rs:1-3".into(), ..entry("core-entry-one", &["a"]) };
+        let stella_entry = IndexEntry { span: ".stella/b.stella".into(), form: Form::Native, ..entry("stella-entry-two", &["b"]) };
+        idx.replace_repo_scoped("repo", &["core".into()], &[(core_entry.clone(), vec![("a".into(), basis_vec(0))])]).unwrap();
+        idx.replace_repo_scoped("repo", &[".stella".into()], &[(stella_entry.clone(), vec![("b".into(), basis_vec(1))])]).unwrap();
+        let rows = idx.entries(Some(Kind::Repo)).unwrap();
+        assert_eq!(rows.len(), 2, "second scoped sync must not wipe the first: {rows:?}");
+        // Re-sync core only — .stella entry survives.
+        idx.replace_repo_scoped("repo", &["core".into()], &[]).unwrap();
+        let rows = idx.entries(Some(Kind::Repo)).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "stella-entry-two");
         let _ = std::fs::remove_file(&path);
     }
 
@@ -374,7 +444,7 @@ mod tests {
         assert_eq!(idx.entries(Some(Kind::Repo)).unwrap().len(), 1);
         assert_eq!(idx.entries(Some(Kind::Memory)).unwrap().len(), 1);
         assert_eq!(idx.entries(None).unwrap().len(), 2);
-        let hits = idx.knn(&basis_vec(1), 5, Some(Kind::Memory)).unwrap();
+        let hits = idx.knn(&basis_vec(1), 5, Some(Kind::Memory), true).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].0, "meta:1");
         let _ = std::fs::remove_file(&path);

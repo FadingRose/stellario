@@ -113,10 +113,10 @@ enum Cmd {
     Sync {
         #[arg(short = 'a', long)]
         author: Option<String>,
-        /// Harvest <stellario> blocks from this repo path into the index
-        /// (read-only on the repo; replaces the repo's index source).
+        /// Harvest <stellario> blocks from these repo paths into the index
+        /// (read-only on the repo; scoped replacement per scanned path).
         #[arg(long)]
-        repo: Option<PathBuf>,
+        repo: Vec<PathBuf>,
         /// Reindex the capsule's memory entries into the index (read-only
         /// on the capsule).
         #[arg(long)]
@@ -346,8 +346,8 @@ fn main() -> Result<()> {
                 .unwrap_or_else(stellario::index::default_path);
 
             // ── repo harvest → index (read-only; stellario = sync plane) ──
-            if let Some(repo_path) = repo {
-                let (entries, root) = stellario::harvest::harvest(std::slice::from_ref(repo_path))?;
+            if !repo.is_empty() {
+                let (entries, root) = stellario::harvest::harvest(&repo)?;
                 let index = stellario::index::Index::open(&index_path)?;
 
                 let all_kw: Vec<String> = entries.iter().flat_map(|e| e.keywords.clone()).collect();
@@ -381,12 +381,23 @@ fn main() -> Result<()> {
                             tags: e.tags.clone(),
                             keywords: e.keywords.clone(),
                             span: e.span.clone(),
+                            form: e.form,
                         },
                         ev,
                     ));
                 }
                 let source = root.display().to_string();
-                let n = index.replace_source(stellario::index::Kind::Repo, &source, &shaped)?;
+                let prefixes: Vec<String> = repo
+                    .iter()
+                    .map(|p| {
+                        let canon = p.canonicalize().unwrap_or_else(|_| p.clone());
+                        canon
+                            .strip_prefix(&root)
+                            .map(|r| r.display().to_string())
+                            .unwrap_or_else(|_| p.display().to_string())
+                    })
+                    .collect();
+                let n = index.replace_repo_scoped(&source, &prefixes, &shaped)?;
                 println!("repo harvest: {} entries from {} -> index {}", n, source, index_path.display());
                 if vecs.is_none() {
                     println!("note: embeddings unavailable — semantic signal skipped (fzf still works)");

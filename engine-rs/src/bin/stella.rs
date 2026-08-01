@@ -18,6 +18,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use stellario::index::{self, EntryRow, Index, Kind};
+use stellario::parse::Form;
 use stellario::telescope::embed_texts;
 
 #[derive(Parser)]
@@ -33,6 +34,9 @@ struct Cli {
     /// Search memory (capsule) entries only.
     #[arg(long)]
     memory: bool,
+    /// Include star drafts (excluded by default).
+    #[arg(long)]
+    stars: bool,
     /// Index file (default ~/.stellario/index.db; env STELLA_INDEX overrides).
     #[arg(long, global = true)]
     index: Option<PathBuf>,
@@ -108,9 +112,13 @@ fn fzf_score(row: &EntryRow, terms: &[&str]) -> f64 {
     total
 }
 
-fn run_query(index_path: &PathBuf, query: &str, intent: &str, kind: Option<Kind>, limit: usize) -> Result<()> {
+fn run_query(index_path: &PathBuf, query: &str, intent: &str, kind: Option<Kind>, limit: usize, include_stars: bool) -> Result<()> {
     let idx = Index::open(index_path)?;
-    let rows = idx.entries(kind)?;
+    let rows: Vec<EntryRow> = idx
+        .entries(kind)?
+        .into_iter()
+        .filter(|r| include_stars || r.form != Form::Star)
+        .collect();
 
     let terms: Vec<&str> = query.split_whitespace().collect();
     let mut scored: std::collections::HashMap<String, (EntryRow, f64)> = std::collections::HashMap::new();
@@ -125,7 +133,7 @@ fn run_query(index_path: &PathBuf, query: &str, intent: &str, kind: Option<Kind>
     // Semantic signal (optional — degrades gracefully to fzf-only).
     if let Some(vecs) = embed_texts(&[query.to_string()]) {
         if let Some(qv) = vecs.first() {
-            let knn = idx.knn(qv, limit * 4, kind).unwrap_or_default();
+            let knn = idx.knn(qv, limit * 4, kind, include_stars).unwrap_or_default();
             for (id, _kw, cosine) in knn {
                 let fused = cosine * 10.0 * 0.5;
                 match scored.get_mut(&id) {
@@ -164,7 +172,7 @@ fn run_query(index_path: &PathBuf, query: &str, intent: &str, kind: Option<Kind>
             Kind::Repo => row.span.clone(),
             Kind::Memory => row.span.clone(),
         };
-        println!("[{}] {} {:.0} — {}", row.id, row.kind.as_str(), score, row.title);
+        println!("[{}] {}/{} {:.0} — {}", row.id, row.kind.as_str(), row.form.as_str(), score, row.title);
         println!("    {loc}");
     }
     Ok(())
@@ -190,7 +198,7 @@ fn run_show(index_path: &PathBuf, id: &str) -> Result<()> {
     }
 
     for row in exact {
-        println!("[{}] {}", row.id, row.kind.as_str());
+        println!("[{}] {}/{}", row.id, row.kind.as_str(), row.form.as_str());
         println!("  source:   {}", row.source);
         println!("  span:     {}", row.span);
         println!("  tags:     {}", row.tags.join(", "));
@@ -234,7 +242,7 @@ fn main() -> Result<()> {
                     (false, true) => Some(Kind::Memory),
                     _ => None,
                 };
-                run_query(&idx_path, q, i, kind, cli.limit.unwrap_or(20))
+                run_query(&idx_path, q, i, kind, cli.limit.unwrap_or(20), cli.stars)
             }
             (Some(_), None) => {
                 eprintln!("intent is mandatory: stella <query> <intent> [--repo] [--memory]");
@@ -258,6 +266,7 @@ mod tests {
         EntryRow {
             id: id.into(),
             kind: Kind::Repo,
+            form: Form::Embed,
             source: "test".into(),
             span: "t.rs:1-3".into(),
             title: content.into(),

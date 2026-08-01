@@ -15,7 +15,7 @@ use std::process::Command;
 
 use anyhow::Result;
 
-use crate::parse::{self, Block, Line};
+use crate::parse::{self, Block, Form, Line};
 
 /// One repo entry, shaped for the index.
 #[derive(Debug, Clone)]
@@ -24,14 +24,16 @@ pub struct HarvestedEntry {
     pub id: String,
     /// One-sentence tldr from the header.
     pub title: String,
-    /// Bound prose paragraph (see module doc).
+    /// Bound prose (embed: paragraph; native: whole file outside blocks).
     pub description: String,
     pub tags: Vec<String>,
     pub keywords: Vec<String>,
-    /// `relative/path.rs:start-end`
+    /// `relative/path.rs:start-end` (embed) or `relative/file.stella` (native)
     pub span: String,
     /// embed | cascade
     pub binding: String,
+    /// embed | native | star
+    pub form: Form,
     /// Wall bullets, flattened to "type: text" lines.
     pub walls: Vec<String>,
     pub author: Option<String>,
@@ -117,6 +119,27 @@ fn repo_root_for(start: &Path) -> PathBuf {
     }
 }
 
+/// All prose in a file outside any block's line range (native entries:
+/// the whole file is the description).
+fn whole_file_prose(lines: &[Line], blocks: &[&Block]) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    'lines: for ln in lines {
+        if !ln.is_content {
+            continue;
+        }
+        for b in blocks {
+            if ln.no >= b.start_line && ln.no <= b.end_line {
+                continue 'lines;
+            }
+        }
+        let t = ln.text.trim();
+        if !t.is_empty() {
+            out.push(t);
+        }
+    }
+    out.join("\n")
+}
+
 /// Harvest all `<stellario>` blocks under the given paths.
 /// Returns (entries, repo_root).
 pub fn harvest(paths: &[PathBuf]) -> Result<(Vec<HarvestedEntry>, PathBuf)> {
@@ -131,24 +154,40 @@ pub fn harvest(paths: &[PathBuf]) -> Result<(Vec<HarvestedEntry>, PathBuf)> {
     for file in &files {
         let Ok(content) = fs::read_to_string(file) else { continue };
         let Some(host) = parse::host_for(file) else { continue };
+        let is_native = file.extension().and_then(|e| e.to_str()) == Some("stella");
         let outcome = parse::extract_blocks(file, host, &content);
+        let block_refs: Vec<&Block> = outcome.blocks.iter().collect();
         for block in &outcome.blocks {
             let Some(slug) = block.slug() else { continue }; // lint's job to flag
-            let binding = block.binding().unwrap_or_else(|| "embed".into());
-            let description = if binding == "cascade" {
-                paragraph_below(&outcome.lines, block.end_line - 1)
-            } else {
-                paragraph_above(&outcome.lines, block.start_line - 1)
-            };
             let rel = file.strip_prefix(&repo_root).unwrap_or(file);
+            let (form, description, span) = if is_native {
+                (
+                    Form::Native,
+                    whole_file_prose(&outcome.lines, &block_refs),
+                    rel.display().to_string(),
+                )
+            } else {
+                let binding = block.binding().unwrap_or_else(|| "embed".into());
+                let description = if binding == "cascade" {
+                    paragraph_below(&outcome.lines, block.end_line - 1)
+                } else {
+                    paragraph_above(&outcome.lines, block.start_line - 1)
+                };
+                (
+                    Form::Embed,
+                    description,
+                    format!("{}:{}-{}", rel.display(), block.start_line, block.end_line),
+                )
+            };
             entries.push(HarvestedEntry {
                 id: slug,
                 title: block.tldr().unwrap_or_default(),
                 description,
                 tags: block.string_list("tags"),
                 keywords: block.string_list("keywords"),
-                span: format!("{}:{}-{}", rel.display(), block.start_line, block.end_line),
-                binding,
+                span,
+                binding: block.binding().unwrap_or_else(|| "embed".into()),
+                form,
                 walls: wall_lines(block),
                 author: match block.get("author") {
                     Some(serde_yaml::Value::String(a)) => Some(a.clone()),

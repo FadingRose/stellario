@@ -10,6 +10,29 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+// ─── Entry form ────────────────────────────────────────────────────────────
+
+/// The attachment scale of an entry (constellation model §3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Form {
+    /// `<stellario>` block inside a host file (.rs/.md).
+    Embed,
+    /// A whole `<slug>.stella` file is one entry.
+    Native,
+    /// A `<slug>.<star>` draft — loose form, excluded from default view.
+    Star,
+}
+
+impl Form {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Form::Embed => "embed",
+            Form::Native => "native",
+            Form::Star => "star",
+        }
+    }
+}
+
 // ─── Host handling (phase 1) ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,7 +44,8 @@ pub enum Host {
 pub fn host_for(path: &Path) -> Option<Host> {
     match path.extension().and_then(|e| e.to_str()) {
         Some("rs") => Some(Host::Rust),
-        Some("md") => Some(Host::Markdown),
+        // `.stella` files are markdown-shaped: prose + one block.
+        Some("md") | Some("stella") => Some(Host::Markdown),
         _ => None,
     }
 }

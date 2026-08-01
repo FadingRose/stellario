@@ -140,7 +140,12 @@ fn check_header(block: &Block, out: &mut Vec<Violation>) {
 }
 
 fn check_binding(block: &Block, prose_before: bool, out: &mut Vec<Violation>) {
+    let is_native = block.file.extension().and_then(|e| e.to_str()) == Some("stella");
     match block.get("binding") {
+        None if is_native => {
+            // Exempt on native entries: the whole file is the description,
+            // embed is implied. (Constellation model §3.1.)
+        }
         None => out.push(Violation {
             severity: Severity::Error,
             code: "binding-required",
@@ -150,6 +155,16 @@ fn check_binding(block: &Block, prose_before: bool, out: &mut Vec<Violation>) {
             suggestion: "add `binding: embed` (annotates the prose above; place at section end) or `binding: cascade` (declares the following subtree; place directly under a heading, before prose).".into(),
         }),
         Some(Value::String(b)) if b == "embed" || b == "cascade" => {
+            if b == "cascade" && is_native {
+                out.push(Violation {
+                    severity: Severity::Error,
+                    code: "cascade-on-native",
+                    file: block.file.clone(),
+                    line: block.start_line,
+                    message: "cascade is meaningless on a native .stella entry (no subtree to declare)".into(),
+                    suggestion: "drop the binding field entirely — native entries are embed-implied; the whole file is the description.".into(),
+                });
+            }
             if b == "embed" && !prose_before {
                 out.push(Violation {
                     severity: Severity::Warning,
