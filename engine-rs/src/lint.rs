@@ -1,17 +1,14 @@
 //! lint — stellario-entry grammar checker (P17, `stellario.skill`).
 //!
-//! Two-phase parsing:
-//!   1. host comment stripping (Rust `//` variants; markdown raw, fenced code
-//!      blocks treated as code, not content)
-//!   2. `<stellario>…</stellario>` zone extraction, YAML subset inside
-//!
-//! Design rules this enforces (see stellario.skill for the full semantics):
+//! Syntax lives in `parse.rs`; this module owns grammar rules and the
+//! driver. Design rules enforced (see stellario.skill for full semantics):
 //!   - `header` required: `word-word-word — one sentence tldr.` (3–5 lowercase
-//!     hyphenated words; repo-unique slug)
+//!     hyphenated words; repo-unique slug; em-dash separator — ': ' breaks
+//!     YAML plain scalars)
 //!   - `binding` required: `embed` | `cascade`
 //!   - `walls` bullets typed: `not:` / `traps:` / `warning:`
 //!   - block content is English-only (retrieval substrate constraint)
-//!   - `chain` paths must resolve relative to the repo root
+//!   - `chain`/`codemap` paths must resolve relative to the repo root
 //!   - refs are state-transparent: `slug.md`, never `slug.state.md`
 //!
 //! There is NO --fix. Violations are reported with friendly, test-covered
@@ -32,6 +29,8 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use serde_yaml::Value;
 use sha2::{Digest, Sha256};
+
+use crate::parse::{self, Block, Line, ParseError, CLOSE_MARKER};
 
 // ─── Public types ──────────────────────────────────────────────────────────
 
@@ -66,192 +65,6 @@ impl LintReport {
     pub fn error_count(&self) -> usize {
         self.violations.iter().filter(|v| v.severity == Severity::Error).count()
     }
-}
-
-// ─── Host handling (phase 1) ───────────────────────────────────────────────
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Host {
-    Rust,
-    Markdown,
-}
-
-fn host_for(path: &Path) -> Option<Host> {
-    match path.extension().and_then(|e| e.to_str()) {
-        Some("rs") => Some(Host::Rust),
-        Some("md") => Some(Host::Markdown),
-        _ => None,
-    }
-}
-
-/// One source line after host adaptation.
-#[derive(Debug)]
-struct Line {
-    no: usize,
-    /// Raw line, unchanged — needed to rewrite `auto` lines in place.
-    raw: String,
-    /// Content with host comment syntax stripped.
-    text: String,
-    /// Everything before the stripped content (e.g. "//! "). Reused when
-    /// writing `auto` lines so they keep the host comment prefix.
-    prefix: String,
-    /// True if this line carries harvestable content (comment / markdown
-    /// prose). False for code lines and fenced-code lines in markdown.
-    is_content: bool,
-}
-
-fn strip_host(host: Host, content: &str) -> Vec<Line> {
-    let mut in_fence = false;
-    content
-        .lines()
-        .enumerate()
-        .map(|(i, raw)| {
-            let no = i + 1;
-            match host {
-                Host::Markdown => {
-                    let trimmed = raw.trim_start();
-                    if trimmed.starts_with("```") {
-                        in_fence = !in_fence;
-                        return Line { no, raw: raw.into(), text: String::new(), prefix: String::new(), is_content: false };
-                    }
-                    if in_fence {
-                        Line { no, raw: raw.into(), text: String::new(), prefix: String::new(), is_content: false }
-                    } else {
-                        Line { no, raw: raw.into(), text: raw.into(), prefix: String::new(), is_content: true }
-                    }
-                }
-                Host::Rust => {
-                    let t = raw.trim_start();
-                    for marker in ["//!", "///", "//"] {
-                        if let Some(rest) = t.strip_prefix(marker) {
-                            let rest = rest.strip_prefix(' ').unwrap_or(rest);
-                            let prefix_len = raw.len() - rest.len();
-                            return Line {
-                                no,
-                                raw: raw.into(),
-                                text: rest.to_string(),
-                                prefix: raw[..prefix_len].to_string(),
-                                is_content: true,
-                            };
-                        }
-                    }
-                    Line { no, raw: raw.into(), text: String::new(), prefix: String::new(), is_content: false }
-                }
-            }
-        })
-        .collect()
-}
-
-// ─── Zone extraction (phase 2) ─────────────────────────────────────────────
-
-const OPEN_MARKER: &str = "<stellario>";
-const CLOSE_MARKER: &str = "</stellario>";
-
-/// Normalize a marker line: accepts bare `<stellario>` and the
-/// markdown-invisible form `<!-- <stellario> -->`.
-fn marker_kind(text: &str) -> Option<bool> {
-    let t = text.trim();
-    let t = t.strip_prefix("<!--").map(|s| s.trim()).unwrap_or(t);
-    let t = t.strip_suffix("-->").map(|s| s.trim()).unwrap_or(t);
-    if t == OPEN_MARKER {
-        Some(true)
-    } else if t == CLOSE_MARKER {
-        Some(false)
-    } else {
-        None
-    }
-}
-
-/// A parsed `<stellario>` block with its location in the file.
-#[derive(Debug)]
-struct Block {
-    file: PathBuf,
-    /// 1-based line number of the opening marker.
-    start_line: usize,
-    /// 1-based line number of the closing marker.
-    end_line: usize,
-    /// The comment prefix of the block's lines (for auto insertion).
-    prefix: String,
-    /// Parsed YAML mapping (raw text kept for error reporting).
-    map: serde_yaml::Mapping,
-}
-
-impl Block {
-    fn get(&self, key: &str) -> Option<&Value> {
-        self.map.get(Value::String(key.into()))
-    }
-
-    /// The slug from `header`, if present and well-formed enough to split.
-    fn slug(&self) -> Option<String> {
-        match self.get("header") {
-            Some(Value::String(h)) => h.splitn(2, " — ").next().map(|s| s.trim().to_string()),
-            _ => None,
-        }
-    }
-}
-
-struct ParseOutcome {
-    blocks: Vec<Block>,
-    lines: Vec<Line>,
-    errors: Vec<Violation>,
-}
-
-fn extract_blocks(path: &Path, host: Host, content: &str) -> ParseOutcome {
-    let lines = strip_host(host, content);
-    let mut blocks = Vec::new();
-    let mut errors = Vec::new();
-    let mut i = 0;
-    while i < lines.len() {
-        let ln = &lines[i];
-        if ln.is_content && marker_kind(&ln.text) == Some(true) {
-            let start = i;
-            let mut j = i + 1;
-            let mut yaml_lines: Vec<&str> = Vec::new();
-            let mut closed = false;
-            while j < lines.len() {
-                if lines[j].is_content && marker_kind(&lines[j].text) == Some(false) {
-                    closed = true;
-                    break;
-                }
-                yaml_lines.push(&lines[j].text);
-                j += 1;
-            }
-            if !closed {
-                errors.push(Violation {
-                    severity: Severity::Error,
-                    code: "unclosed-block",
-                    file: path.into(),
-                    line: ln.no,
-                    message: "<stellario> block is never closed".into(),
-                    suggestion: format!("add a closing line: {} (same comment prefix as the opening marker)", CLOSE_MARKER),
-                });
-                i = j;
-                continue;
-            }
-            let yaml_text = yaml_lines.join("\n");
-            match serde_yaml::from_str::<serde_yaml::Mapping>(&yaml_text) {
-                Ok(map) => blocks.push(Block {
-                    file: path.into(),
-                    start_line: lines[start].no,
-                    end_line: lines[j].no,
-                    prefix: lines[start].prefix.clone(),
-                    map,
-                }),
-                Err(e) => errors.push(Violation {
-                    severity: Severity::Error,
-                    code: "yaml-parse",
-                    file: path.into(),
-                    line: lines[start].no,
-                    message: format!("block is not valid YAML: {e}"),
-                    suggestion: "block interior is a YAML subset: flat keys, scalar lists (`tags: [a, b]`), typed bullets (`- not: …`). Check indentation. Common cause: `header: slug: tldr` — the slug/tldr separator is ' — ' (em-dash), because ': ' is illegal in a YAML plain scalar.".into(),
-                }),
-            }
-            i = j + 1;
-        } else {
-            i += 1;
-        }
-    }
-    ParseOutcome { blocks, lines, errors }
 }
 
 // ─── Checks ────────────────────────────────────────────────────────────────
@@ -320,7 +133,7 @@ fn check_header(block: &Block, out: &mut Vec<Violation>) {
             code: "slug-format",
             file: block.file.clone(),
             line: block.start_line,
-            message: "header must be a plain string `slug: tldr`".into(),
+            message: "header must be a plain string `slug — tldr`".into(),
             suggestion: "write it as one line: header: word-word-word — one sentence tldr.".into(),
         }),
     }
@@ -517,8 +330,8 @@ fn check_unknown_keys(block: &Block, out: &mut Vec<Violation>) {
 }
 
 /// Is there prose above the block? (B6 detection.)
-/// Walk upward skipping blank content lines. Heading, code line, or another
-/// block's content boundary → no prose. Any other content line → prose.
+/// Walk upward skipping blank content lines. Heading, code line, or start of
+/// file → no prose. Any other content line → prose.
 fn prose_above(lines: &[Line], block_start_idx: usize) -> bool {
     let mut i = block_start_idx;
     while i > 0 {
@@ -644,36 +457,6 @@ fn maintain_auto(
 
 // ─── Driver ────────────────────────────────────────────────────────────────
 
-fn collect_files(paths: &[PathBuf], out: &mut Vec<PathBuf>) {
-    for p in paths {
-        if p.is_file() {
-            if host_for(p).is_some() {
-                out.push(p.clone());
-            }
-        } else if p.is_dir() {
-            visit_dir(p, out);
-        }
-    }
-}
-
-fn visit_dir(dir: &Path, out: &mut Vec<PathBuf>) {
-    const SKIP: &[&str] = &[".git", "target", "node_modules", ".fastembed_cache", "dist"];
-    let Ok(entries) = fs::read_dir(dir) else { return };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if name.starts_with('.') || SKIP.contains(&name.as_ref()) {
-            continue;
-        }
-        if path.is_dir() {
-            visit_dir(&path, out);
-        } else if host_for(&path).is_some() {
-            out.push(path);
-        }
-    }
-}
-
 fn repo_root_for(start: &Path) -> PathBuf {
     let out = Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
@@ -687,6 +470,27 @@ fn repo_root_for(start: &Path) -> PathBuf {
     }
 }
 
+fn map_parse_error(file: &Path, e: ParseError) -> Violation {
+    match e {
+        ParseError::Unclosed { line } => Violation {
+            severity: Severity::Error,
+            code: "unclosed-block",
+            file: file.into(),
+            line,
+            message: "<stellario> block is never closed".into(),
+            suggestion: format!("add a closing line: {} (same comment prefix as the opening marker)", CLOSE_MARKER),
+        },
+        ParseError::Yaml { line, error } => Violation {
+            severity: Severity::Error,
+            code: "yaml-parse",
+            file: file.into(),
+            line,
+            message: format!("block is not valid YAML: {error}"),
+            suggestion: "block interior is a YAML subset: flat keys, scalar lists (`tags: [a, b]`), typed bullets (`- not: …`). Check indentation. Common cause: `header: slug: tldr` — the slug/tldr separator is ' — ' (em-dash), because ': ' is illegal in a YAML plain scalar.".into(),
+        },
+    }
+}
+
 /// Run lint over the given paths. Returns the report; the caller decides the
 /// exit code (errors → non-zero).
 pub fn run(paths: &[PathBuf]) -> Result<LintReport> {
@@ -694,7 +498,7 @@ pub fn run(paths: &[PathBuf]) -> Result<LintReport> {
     let repo_root = repo_root_for(&cwd);
 
     let mut files = Vec::new();
-    collect_files(paths, &mut files);
+    parse::collect_files(paths, &mut files);
     files.sort();
 
     let mut report = LintReport::default();
@@ -720,9 +524,9 @@ pub fn run(paths: &[PathBuf]) -> Result<LintReport> {
                 continue;
             }
         };
-        let host = host_for(file).expect("filtered by collect_files");
-        let outcome = extract_blocks(file, host, &content);
-        report.violations.extend(outcome.errors);
+        let host = parse::host_for(file).expect("filtered by collect_files");
+        let outcome = parse::extract_blocks(file, host, &content);
+        report.violations.extend(outcome.errors.into_iter().map(|e| map_parse_error(file, e)));
         report.blocks_found += outcome.blocks.len();
 
         let base = all_blocks.len();
@@ -771,24 +575,11 @@ pub fn run(paths: &[PathBuf]) -> Result<LintReport> {
     // auto maintenance (lint-owned writes, with notices).
     for (file, idxs) in &file_blocks {
         let lines = &file_lines[file];
-        let blocks: Vec<Block> = idxs.iter().map(|&i| all_blocks[i].clone_shallow()).collect();
+        let blocks: Vec<Block> = idxs.iter().map(|&i| all_blocks[i].clone()).collect();
         maintain_auto(file, lines, &blocks, &repo_root, &mut report.auto_notices)?;
     }
 
     Ok(report)
-}
-
-impl Block {
-    /// Clone location + parsed map (cheap enough at lint scale).
-    fn clone_shallow(&self) -> Block {
-        Block {
-            file: self.file.clone(),
-            start_line: self.start_line,
-            end_line: self.end_line,
-            prefix: self.prefix.clone(),
-            map: self.map.clone(),
-        }
-    }
 }
 
 /// Print the report in the human-facing format.
@@ -818,6 +609,7 @@ pub fn print_report(report: &LintReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parse::{extract_blocks, Host, ParseOutcome};
 
     fn parse_rust(content: &str) -> ParseOutcome {
         extract_blocks(Path::new("test.rs"), Host::Rust, content)
@@ -944,8 +736,10 @@ mod tests {
         let src = "//! Prose.\n//! <stellario>\n//! header: alpha-beta-gamma — tldr.\n";
         let outcome = parse_rust(src);
         assert_eq!(outcome.errors.len(), 1);
-        assert_eq!(outcome.errors[0].code, "unclosed-block");
-        assert!(outcome.errors[0].suggestion.contains("</stellario>"));
+        assert!(matches!(outcome.errors[0], ParseError::Unclosed { .. }));
+        let v = map_parse_error(Path::new("test.rs"), outcome.errors.into_iter().next().unwrap());
+        assert_eq!(v.code, "unclosed-block");
+        assert!(v.suggestion.contains("</stellario>"));
     }
 
     #[test]
@@ -989,7 +783,8 @@ mod tests {
 
         let content = fs::read_to_string(&file).unwrap();
         let outcome = extract_blocks(&file, Host::Rust, &content);
-        let blocks: Vec<Block> = outcome.blocks.iter().map(|b| b.clone_shallow()).collect();
+        let blocks: Vec<Block> = outcome.blocks.clone();
+
         // insert
         let hash = span_hash(&outcome.lines, &blocks);
         let wanted = format!("{hash} at 2026-08-01T00:00:00+00:00");

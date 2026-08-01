@@ -23,6 +23,9 @@ sha2 = "0.11"
 hex = "0.4"
 # Semantic search — same ONNX MiniLM weights as the TS pipeline (numerically equivalent).
 fastembed = "4"
+# Index plane (Phase 4) — embedded single-file vector store.
+rusqlite = { version = "0.32", features = ["bundled"] }
+sqlite-vec = "0.1"
 # MCP server (official SDK, stdio transport).
 rmcp = { version = "3", features = ["server", "transport-io"] }
 tokio = { version = "1", features = ["full"] }

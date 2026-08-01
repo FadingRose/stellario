@@ -237,6 +237,12 @@ fn cosine(a: &[f32], b: &[f32]) -> f64 {
 
 // ─── Embedding engine (lazy singleton) ─────────────────────────────────────
 
+/// Embed texts with the shared engine. Returns None when embeddings are
+/// unavailable (offline / model missing) — callers degrade to fzf-only.
+pub fn embed_texts(texts: &[String]) -> Option<Vec<Vec<f32>>> {
+    EmbeddingEngine::get().and_then(|e| e.embed(texts).ok())
+}
+
 /// Lazily-initialized fastembed TextEmbedding. Thread-safe, loaded on first
 /// semantic search. If the model can't load (offline, missing), returns None
 /// and search degrades to fzf-only.

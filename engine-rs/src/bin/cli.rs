@@ -112,7 +112,18 @@ enum Cmd {
     /// Sync: ingest changed .md files from the workdir. Use --author for provenance.
     Sync {
         #[arg(short = 'a', long)]
-        author: String,
+        author: Option<String>,
+        /// Harvest <stellario> blocks from this repo path into the index
+        /// (read-only on the repo; replaces the repo's index source).
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        /// Reindex the capsule's memory entries into the index (read-only
+        /// on the capsule).
+        #[arg(long)]
+        reindex_memory: bool,
+        /// Index file (default ~/.stellario/index.db; env STELLA_INDEX overrides).
+        #[arg(long)]
+        index: Option<PathBuf>,
     },
     /// Delete an entry (supersede to tombstone). Disappears from search, stays in lineage.
     Delete {
@@ -328,7 +339,75 @@ fn main() -> Result<()> {
             println!("{}", path.display());
         }
 
-        Cmd::Sync { author } => {
+        Cmd::Sync { author, repo, reindex_memory, index } => {
+            let index_path = index
+                .clone()
+                .or_else(|| std::env::var("STELLA_INDEX").ok().map(PathBuf::from))
+                .unwrap_or_else(stellario::index::default_path);
+
+            // ── repo harvest → index (read-only; stellario = sync plane) ──
+            if let Some(repo_path) = repo {
+                let (entries, root) = stellario::harvest::harvest(std::slice::from_ref(repo_path))?;
+                let index = stellario::index::Index::open(&index_path)?;
+
+                let all_kw: Vec<String> = entries.iter().flat_map(|e| e.keywords.clone()).collect();
+                let vecs = stellario::telescope::embed_texts(&all_kw);
+                let mut kw_iter = all_kw.iter();
+                let mut vec_iter = vecs.as_ref().map(|v| v.iter());
+
+                let mut shaped = Vec::new();
+                for e in &entries {
+                    let n = e.keywords.len();
+                    let kws: Vec<String> = kw_iter.by_ref().take(n).cloned().collect();
+                    let ev: Vec<(String, Vec<f32>)> = match &mut vec_iter {
+                        Some(vi) => kws.into_iter().zip(vi.by_ref().take(n).cloned()).collect(),
+                        None => Vec::new(),
+                    };
+                    // Content = tldr + bound prose + walls — what fzf scores.
+                    let mut content = e.title.clone();
+                    if !e.description.is_empty() {
+                        content.push('\n');
+                        content.push_str(&e.description);
+                    }
+                    if !e.walls.is_empty() {
+                        content.push('\n');
+                        content.push_str(&e.walls.join("\n"));
+                    }
+                    shaped.push((
+                        stellario::index::IndexEntry {
+                            id: e.id.clone(),
+                            title: e.title.clone(),
+                            content,
+                            tags: e.tags.clone(),
+                            keywords: e.keywords.clone(),
+                            span: e.span.clone(),
+                        },
+                        ev,
+                    ));
+                }
+                let source = root.display().to_string();
+                let n = index.replace_source(stellario::index::Kind::Repo, &source, &shaped)?;
+                println!("repo harvest: {} entries from {} -> index {}", n, source, index_path.display());
+                if vecs.is_none() {
+                    println!("note: embeddings unavailable — semantic signal skipped (fzf still works)");
+                }
+                return Ok(());
+            }
+
+            // ── memory reindex (read-only on the capsule) ──
+            if *reindex_memory {
+                let capsule_name = resolve_capsule_name(&cli);
+                let (_, storage) = load_capsule(Some(&capsule_name))?;
+                let index = stellario::index::Index::open(&index_path)?;
+                let n = stellario::index::ingest_memory(&index, &capsule_name, &storage, &|texts| {
+                    stellario::telescope::embed_texts(texts)
+                })?;
+                println!("memory reindex: {} entries from capsule '{}' -> index {}", n, capsule_name, index_path.display());
+                return Ok(());
+            }
+
+            // ── original workdir sync (author required) ──
+            let author = author.clone().ok_or_else(|| anyhow!("--author is required for workdir sync"))?;
             let capsule_name = resolve_capsule_name(&cli);
             let path = project_capsule_path(&capsule_name)
                 .ok_or_else(|| anyhow!("capsule '{}' not found", capsule_name))?;
@@ -336,7 +415,7 @@ fn main() -> Result<()> {
             let mut storage = AutomergeStorage::load(&bytes)?;
             let mut wd = stellario::Workdir::new("cli")?;
             wd.discover_from_disk()?;
-            let results = wd.sync(&mut storage, author)?;
+            let results = wd.sync(&mut storage, &author)?;
             let new_bytes = storage.save()?;
             std::fs::write(&path, &new_bytes)?;
             if results.is_empty() {
