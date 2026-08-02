@@ -385,3 +385,39 @@ mod tests {
         assert!(s.content.starts_with("(migrated to"), "source must be tombstoned: {}", s.content);
     }
 }
+
+#[cfg(test)]
+mod distill_debug {
+    use super::*;
+
+    fn native_with_ref(target: &str) -> String {
+        format!("# T\n\n<stellario>\nheader: some-native-entry — tldr.\nrefs:\n  - supersedes: {target} — distilled\n</stellario>\n")
+    }
+
+    #[test]
+    fn distilled_detection_works() {
+        let mut s = AutomergeStorage::new();
+        // native with a supersedes ref to a legacy meta entry
+        s.write("native", Some("some-native-entry"),
+            &native_with_ref("meta:52"),
+            &["type:reference".into()], &[], "t", "seed", &[], &[]).unwrap();
+        // the legacy meta:52
+        s.write("meta", Some("52"),
+            "## content", &[], &[], "t", "seed", &[], &[]).unwrap();
+
+        let registry = vec![("test".to_string(), s)];
+        let distilled = distilled_legacy_ids(&registry);
+        eprintln!("distilled set: {:?}", distilled);
+        assert!(distilled.contains("meta:52"), "meta:52 must be in the distilled set");
+
+        // doctor must not report meta:52 as un-distilled
+        let idx_path = std::env::temp_dir().join(format!("govern-debug-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&idx_path);
+        let idx = Index::open(&idx_path).unwrap();
+        let staging = std::env::temp_dir().join("no-staging");
+        let findings = doctor(&registry, &idx, &staging, Level::Info);
+        eprintln!("findings: {:?}", findings.iter().map(|f| (&f.code, &f.entry)).collect::<Vec<_>>());
+        assert!(!findings.iter().any(|f| f.code == "un-distilled"), "meta:52 must not be reported un-distilled");
+        let _ = std::fs::remove_file(&idx_path);
+    }
+}
