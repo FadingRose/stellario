@@ -146,6 +146,26 @@ enum Cmd {
         #[arg(long)]
         out: PathBuf,
     },
+    /// Governance check: full-system health report with graded findings
+    /// (error/warning/info) and executable actions. Read-only.
+    Doctor {
+        /// Minimum level to show (error|warning|info).
+        #[arg(long, default_value = "info")]
+        level: String,
+    },
+    /// Governance act: migrate entries to a target capsule (auto-created).
+    /// Source entries are tombstoned with intent; provenance stays in lineage.
+    Migrate {
+        /// Entry ids (volume:id or slug), e.g. whiteboard:99.
+        #[arg(required = true)]
+        ids: Vec<String>,
+        /// Target capsule (auto-created if missing).
+        #[arg(long)]
+        to: String,
+        /// Source capsule (default: resolve each id across all capsules).
+        #[arg(long)]
+        from: Option<String>,
+    },
     /// Delete an entry (supersede to tombstone). Disappears from search, stays in lineage.
     Delete {
         /// Entry id (volume:n).
@@ -619,6 +639,98 @@ fn main() -> Result<()> {
                 stats.bytes,
                 out.display()
             );
+        }
+
+        Cmd::Doctor { level } => {
+            let min = match level.as_str() {
+                "error" => stellario::govern::Level::Error,
+                "warning" => stellario::govern::Level::Warning,
+                _ => stellario::govern::Level::Info,
+            };
+            let index_path = std::env::var("STELLA_INDEX")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| stellario::index::default_path());
+            let index = stellario::index::Index::open(&index_path)?;
+            let mut registry = Vec::new();
+            for name in discover_capsules() {
+                let Ok((_, storage)) = load_capsule(Some(&name)) else { continue };
+                registry.push((name, storage));
+            }
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+            let staging = PathBuf::from(home).join(".stellario/staging");
+            let findings = stellario::govern::doctor(&registry, &index, &staging, min);
+            print!("{}", stellario::govern::format_report(&findings));
+            if findings.iter().any(|f| f.level == stellario::govern::Level::Error) {
+                std::process::exit(1);
+            }
+        }
+
+        Cmd::Migrate { ids, to, from } => {
+            let index_path = std::env::var("STELLA_INDEX")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| stellario::index::default_path());
+            let to_path = ensure_capsule(&to)?;
+            let to_bytes = std::fs::read(&to_path)?;
+            let mut to_storage = AutomergeStorage::load(&to_bytes)?;
+
+            let mut done = Vec::new();
+            for id in ids {
+                let (from_name, mut from_storage) = match &from {
+                    Some(f) => {
+                        let p = project_capsule_path(f)
+                            .ok_or_else(|| anyhow!("capsule '{}' not found", f))?;
+                        let bytes = std::fs::read(&p)?;
+                        (f.clone(), AutomergeStorage::load(&bytes)?)
+                    }
+                    None => {
+                        // resolve across all capsules
+                        let mut found = None;
+                        for name in discover_capsules() {
+                            if let Ok((_, storage)) = load_capsule(Some(&name)) {
+                                let (vol, n) = match id.split_once(':') {
+                                    Some((v, n)) => (v.to_string(), n.to_string()),
+                                    None => (stellario::harvest::NATIVE_VOLUME.to_string(), id.clone()),
+                                };
+                                if storage.materialize(&vol, &n)?.is_some() {
+                                    found = Some((name, storage));
+                                    break;
+                                }
+                            }
+                        }
+                        found.ok_or_else(|| anyhow!("{id}: not found in any capsule"))?
+                    }
+                };
+                let migrated = stellario::govern::migrate(
+                    &mut from_storage,
+                    &mut to_storage,
+                    &[id.as_str()],
+                    &from_name,
+                    &to,
+                    "stellario",
+                )?;
+                if !migrated.is_empty() {
+                    let p = project_capsule_path(&from_name)
+                        .ok_or_else(|| anyhow!("capsule '{}' not found", from_name))?;
+                    std::fs::write(&p, from_storage.save()?)?;
+                }
+                done.extend(migrated);
+            }
+            std::fs::write(&to_path, to_storage.save()?)?;
+
+            // reindex both sides
+            let index = stellario::index::Index::open(&index_path)?;
+            for cap in [&to, from.as_deref().unwrap_or("")] {
+                if cap.is_empty() {
+                    continue;
+                }
+                if let Ok((_, storage)) = load_capsule(Some(cap)) {
+                    let n = stellario::index::ingest_memory(&index, cap, &storage, &|texts| {
+                        stellario::telescope::embed_texts(texts)
+                    })?;
+                    println!("memory reindex: {} entries from capsule '{}'", n, cap);
+                }
+            }
+            println!("migrated: {}", done.join(", "));
         }
 
         Cmd::Delete { id, author, intent } => {

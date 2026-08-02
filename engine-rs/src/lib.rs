@@ -12,6 +12,7 @@
 pub mod config;
 pub mod constellation;
 pub mod export;
+pub mod govern;
 pub mod harvest;
 pub mod hints;
 pub mod identity;

@@ -71,7 +71,7 @@ impl LintReport {
 
 const KNOWN_FIELDS: &[&str] = &[
     "header", "binding", "tags", "keywords", "walls", "refs", "chain", "codemap",
-    "owner", "author", "auto",
+    "owner", "author", "auto", "stars",
 ];
 
 const WALL_TYPES: &[&str] = &["not", "traps", "warning"];
@@ -504,6 +504,18 @@ fn map_parse_error(file: &Path, e: ParseError) -> Violation {
             suggestion: "block interior is a YAML subset: flat keys, scalar lists (`tags: [a, b]`), typed bullets (`- not: …`). Check indentation. Common cause: `header: slug: tldr` — the slug/tldr separator is ' — ' (em-dash), because ': ' is illegal in a YAML plain scalar.".into(),
         },
     }
+}
+
+/// Run the context-free checks on a single materialized block (no binding —
+/// prose context unknown; no chain resolution — needs a repo root). Used by
+/// `stellario doctor` for capsule-resident entries.
+pub fn lint_block(block: &Block) -> Vec<Violation> {
+    let mut v = Vec::new();
+    check_header(block, &mut v);
+    check_walls(block, &mut v);
+    check_english(block, &mut v);
+    check_unknown_keys(block, &mut v);
+    v
 }
 
 /// Run lint over the given paths. Returns the report; the caller decides the
