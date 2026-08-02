@@ -89,6 +89,15 @@ fn distilled_legacy_ids(registry: &[(String, AutomergeStorage)]) -> HashSet<Stri
                             out.insert(target.to_string());
                         }
                     }
+                    // cluster: [ids...] — every listed member is distilled (D3).
+                    if let Some(list) = r.trim().strip_prefix("cluster:") {
+                        for item in list.split([',', ' ', '[', ']']) {
+                            let item = item.trim();
+                            if item.contains(':') {
+                                out.insert(item.to_string());
+                            }
+                        }
+                    }
                 }
             }
         }

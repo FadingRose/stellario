@@ -179,10 +179,25 @@ impl Block {
                 .filter_map(|i| match i {
                     serde_yaml::Value::String(s) => Some(s.clone()),
                     serde_yaml::Value::Mapping(m) if m.len() == 1 => {
-                        // single-key mapping → "key: value" bullet
+                        // single-key mapping → "key: value" bullet; sequence
+                        // values (e.g. `cluster: [a, b]`) join with ", "
                         m.iter().next().and_then(|(k, v)| match (k, v) {
                             (serde_yaml::Value::String(k), serde_yaml::Value::String(v)) => {
                                 Some(format!("{k}: {v}"))
+                            }
+                            (serde_yaml::Value::String(k), serde_yaml::Value::Sequence(items)) => {
+                                let joined: Vec<&str> = items
+                                    .iter()
+                                    .filter_map(|i| match i {
+                                        serde_yaml::Value::String(s) => Some(s.as_str()),
+                                        _ => None,
+                                    })
+                                    .collect();
+                                if joined.is_empty() {
+                                    None
+                                } else {
+                                    Some(format!("{k}: {}", joined.join(", ")))
+                                }
                             }
                             _ => None,
                         })
