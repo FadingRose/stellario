@@ -17,11 +17,9 @@
 //! 2026-06-19 → 08-02): read 78%, meta 6%, write 0%. Unknown intents default
 //! to read — the data-supported bias.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::index::{EntryRow, Index, Kind};
-use crate::parse::Form;
 
 /// A single hint — one line, ending in an actionable command.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,7 +150,7 @@ pub const ZERO_FLOOR: f64 = 5.0;
 /// (post-dedupe, pre-scoring); `scored` = rows with fzf score > 0.
 /// Returns at most 3 hints, deterministic order.
 pub fn query_hints(
-    idx: &Index,
+    _idx: &Index,
     rows: &[EntryRow],
     scored: &[(EntryRow, f64)],
     query: &str,
@@ -242,7 +240,7 @@ pub fn query_hints(
 }
 
 /// Entry-contextual hints for `stella show`.
-pub fn show_hints(idx: &Index, row: &EntryRow) -> Vec<Hint> {
+pub fn show_hints(_idx: &Index, row: &EntryRow) -> Vec<Hint> {
     let mut hints: Vec<Hint> = Vec::new();
     if is_legacy(row) {
         let cap = &row.source;

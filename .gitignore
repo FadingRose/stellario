@@ -17,4 +17,4 @@ engine-rs/target/
 .zcode/
 
 # fastembed model cache (downloaded on first semantic search)
-engine-rs/.fastembed_cache/
+.fastembed_cache/

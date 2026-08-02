@@ -443,6 +443,7 @@ struct RawRef {
 
 /// A legacy memory entry as found in `<volume>.jsonl`.
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // legacy migration data-model fields kept for history/import
 struct RawEntry {
     #[serde(default)]
     id: String,
@@ -471,6 +472,7 @@ struct RawEntry {
 
 /// A legacy task from `taskboard.jsonl`.
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // legacy migration data-model fields kept for history/import
 struct RawTask {
     #[serde(default)]
     id: String,

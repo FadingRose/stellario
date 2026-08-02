@@ -15,7 +15,7 @@
 //! metadata. sync --status covers repo-side constellation state meanwhile.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::Result;
 

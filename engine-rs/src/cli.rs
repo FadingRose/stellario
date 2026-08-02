@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
 
-use crate::{AutomergeStorage, Edge, EdgeKind, SearchParams, Storage, Workdir, search};
+use crate::{AutomergeStorage, SearchParams, Storage, search};
 
 const USAGE_GUIDE: &str = "\
 ONE TOOL, FIVE VERB CLASSES
@@ -114,8 +114,6 @@ enum Cmd {
     /// the staging shape — pass --capsule (default: the scratch inbox,
     /// auto-created). --repo <paths> harvests explicitly.
     Sync {
-        #[arg(short = 'a', long)]
-        author: Option<String>,
         #[arg(long)]
         repo: Vec<PathBuf>,
         #[arg(long)]
@@ -173,43 +171,6 @@ enum Cmd {
     Volumes,
     /// View the version+intent timeline of an entry.
     Lineage { id: String },
-    /// Expand an entry to an editable .md file. Edit the file, then sync.
-    Expand { id: String },
-    /// RETIRED: create a blank .md template (constellation §4). --dangerous.
-    ExpandNew {
-        volume: String,
-        #[arg(long)]
-        id_hint: Option<String>,
-        #[arg(long)]
-        dangerous: bool,
-    },
-    /// RETIRED: write an entry via API (constellation §4). --dangerous.
-    Write {
-        #[arg(short = 'v', long)]
-        volume: String,
-        #[arg(short = 'c', long)]
-        content: String,
-        #[arg(short = 'i', long)]
-        intent: String,
-        #[arg(long, value_delimiter = ',')]
-        tags: Vec<String>,
-        #[arg(long, value_delimiter = ',')]
-        keywords: Vec<String>,
-        #[arg(short = 'a', long)]
-        author: String,
-        #[arg(long)]
-        target_id: Option<String>,
-        #[arg(long)]
-        dangerous: bool,
-    },
-    /// Delete an entry (supersede to tombstone). Stays in lineage.
-    Delete {
-        id: String,
-        #[arg(short = 'a', long)]
-        author: String,
-        #[arg(short = 'i', long, default_value = "deleted")]
-        intent: String,
-    },
 }
 
 // ─── capsule registry helpers ───────────────────────────────────────────────
@@ -703,51 +664,7 @@ pub fn run() -> Result<()> {
             }
             Ok(())
         }
-        Some(Cmd::Expand { id }) => {
-            let (_name, storage) = load_capsule(cli.capsule.as_deref())?;
-            let (vol, n) = parse_id(id)?;
-            let entry = storage
-                .materialize(&vol, &n)?
-                .ok_or_else(|| anyhow!("{} not found", id))?;
-            let mut wd = Workdir::new("cli")?;
-            let path = wd.expand(&entry)?;
-            println!("{}", path.display());
-            Ok(())
-        }
-        Some(Cmd::ExpandNew { volume, id_hint, dangerous }) => {
-            if !*dangerous {
-                eprintln!("expand-new is retired (constellation model §4): write a <slug>.stella file directly.");
-                eprintln!("  use --dangerous to override during the transition.");
-                std::process::exit(2);
-            }
-            let mut wd = Workdir::new("cli")?;
-            let hint = id_hint.clone().unwrap_or_else(|| "new".to_string());
-            let path = wd.expand_new(volume, &hint)?;
-            println!("{}", path.display());
-            Ok(())
-        }
-        Some(Cmd::Write { volume, content, intent, tags, keywords, author, target_id, dangerous }) => {
-            if !*dangerous {
-                eprintln!("create is retired (constellation model §4): authoring happens in editors as files.");
-                eprintln!("  site-free knowledge  → write a <slug>.stella native entry");
-                eprintln!("  drafts               → write a <slug>.<star> file in .stella/");
-                eprintln!("  use --dangerous to override during the transition.");
-                std::process::exit(2);
-            }
-            let capsule_name = resolve_capsule_name(&cli);
-            let path = project_capsule_path(&capsule_name)
-                .ok_or_else(|| anyhow!("capsule '{}' not found", capsule_name))?;
-            let bytes = std::fs::read(&path)?;
-            let mut storage = AutomergeStorage::load(&bytes)?;
-            let (id, hash) = storage.write(
-                volume, target_id.as_deref(), content, tags, keywords, author, intent, &[], &[],
-            )?;
-            let new_bytes = storage.save()?;
-            std::fs::write(&path, &new_bytes)?;
-            println!("written: {}:{}  hash={}", volume, id, hash);
-            Ok(())
-        }
-        Some(Cmd::Sync { author, repo, reindex_memory, status }) => {
+        Some(Cmd::Sync { repo, reindex_memory, status }) => {
             if *status {
                 let cwd = std::env::current_dir()?;
                 let root = {
@@ -910,31 +827,6 @@ pub fn run() -> Result<()> {
                 }
             }
             println!("migrated: {}", done.join(", "));
-            Ok(())
-        }
-        Some(Cmd::Delete { id, author, intent }) => {
-            let capsule_name = resolve_capsule_name(&cli);
-            let path = project_capsule_path(&capsule_name)
-                .ok_or_else(|| anyhow!("capsule '{}' not found", capsule_name))?;
-            let bytes = std::fs::read(&path)?;
-            let mut storage = AutomergeStorage::load(&bytes)?;
-            let (vol, n) = parse_id(id)?;
-            let entry = storage.materialize(&vol, &n)?
-                .ok_or_else(|| anyhow!("{} not found", id))?;
-            let supersede_edge = Edge {
-                from: String::new(),
-                to: entry.hash.clone(),
-                kind: EdgeKind::Supersede,
-                reason: intent.clone(),
-            };
-            storage.write(
-                &vol, Some(&n),
-                "(deleted)", &["type:deleted".to_string()], &[],
-                author, intent, &[], &[supersede_edge],
-            )?;
-            let new_bytes = storage.save()?;
-            std::fs::write(&path, &new_bytes)?;
-            println!("deleted: {} (superseded, stays in lineage)", id);
             Ok(())
         }
         None => match (&cli.query, &cli.intent) {
