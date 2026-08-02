@@ -88,36 +88,60 @@ would be ceremony without information. Lint treats it as optional for
 gitignore: `.stella/*` with `!.stella/*.stella` — canonicals are tracked,
 stars are not.
 
-### 3.6 Three planes, one authority rule
+### 3.6 Truth, creation, distribution — the final topology
 
-Storage, index, and edit are separate planes with non-overlapping
-lifecycles:
+Storage, index, and edit are separate planes; their lifecycles do not
+overlap and every transition is an explicit tool act. The topology was
+finalized by deskcheck (2026-08-02):
 
-| Plane | Holds | Authority |
-|-------|-------|-----------|
-| storage (automerge capsule) | entry versions + version graph | **truth** — append-only, replayable |
-| index (index.db) | projected rows + anchor vectors | none — derived, rebuildable |
-| edit (files: work copies, staging, repo `.stella`) | working surface | none — transient (pre-sync files excepted) |
+**Truth lives in exactly two places:**
 
-All plane transitions are explicit tool acts (sync / reindex / expand /
-export); none is magic. Index is never edited; capsule is never edited
-directly; edits always happen on files.
+- **inline on the repo** — embed blocks bound to code; the file is truth.
+- **entry in the capsule** — native entries; the capsule is truth.
 
-**Authority by residence** (resolves the dual-residency question):
+Nothing else is truth: not repo `.stella` files, not exports, not the
+index. This kills dual-residency ambiguity outright (the earlier
+"authority by residence" nuance is subsumed: inline → file, native →
+capsule, period).
 
-- **embed blocks** (inline markers in `.rs`/`.md`): truth stays with the
-  inlined part — the file. The knowledge is bound to the code; the code is
-  the truth.
-- **self-contained `<slug>.stella` files**: after sync, the **capsule is
-  the single truth**; the repo file is an edit/review surface (git-tracked
-  for review, never authoritative). Pre-sync, the file is still the truth;
-  sync is the moment truth migrates to the capsule.
+**Creation and editing are one surface, determined by directory shape
+(the shape rule):**
 
-Consequence for `stella show`: the authority pointer is per-residence —
-repo/embed hits point at the file; repo/native hits point at the capsule
-(post-sync); memory hits point at the capsule + lineage.
+- a directory with a top-level `.stellario` config **and** `.stella/`
+  declares its own home: sync is automatic — the config names the capsule.
+- a directory with only `.stella/` (no `.stellario`) has an undeclared
+  home: **this is staging** — sync must be told the target explicitly
+  (`--capsule`). `~/.stellario/staging/` is the conventional instance of
+  the shape, not a special location. Any directory can act as staging.
+- upgrading staging to a permanent surface = adding one `.stellario` file.
 
-### 3.7 lint vs doctor — validation split
+The repo's `.stella/` is therefore a *creation surface* (git-tracked,
+reviewable, lint-gated), never a memory home and never a view.
+
+**Distribution is the capsule itself:** CRDT sync carries memory across
+devices; a fresh clone re-seeds a capsule from its `.stella/` via sync.
+No generated views, no ephemeral symlink surface, no second memory home.
+
+### 3.7 the `.stellario` config — the repo declares its home
+
+A top-level hidden file beside `AGENTS.md` / `.gitignore`:
+
+```yaml
+# .stellario
+version: 1
+capsules: [edelweiss-core]   # sync targets; may list several
+creation_dir: .stella/       # convention, configurable
+```
+
+- **Discovery:** `sync` walks up from cwd to the nearest `.stellario`
+  (git-like). A subtree may declare its own home; the repo root is the
+  common case.
+- **Semantics:** present + `.stella/` → self-declared home, sync
+  automatic; absent + `.stella/` → undeclared, sync requires `--capsule`
+  (the staging shape). Both shapes use the same entry model and the same
+  lint gate.
+
+### 3.8 lint vs doctor — validation split
 
 `stella lint` scans the **edit plane only** (files): stella faces the
 currently visible environment. Capsule-resident entries are linted by a
@@ -214,12 +238,15 @@ nobody is forced to see is a report that decays.
 
 - `stella` — query, lint, show (unchanged; gains constellation side-notes
   and a `--stars` flag). Lint scans the edit plane (files) only.
-- `stellario` — **sync only**:
-  - `sync --repo <path>` harvests embed blocks (existing) **and native
-    `.stella` entries** (this proposal).
-  - `sync --capsule` carries `.stella` files ↔ capsule (native entries and
-    stars — drafts survive sessions without git).
+- `stellario` — **sync only**, shape-aware:
+  - `sync` (no args, from a directory with `.stellario`) — automatic:
+    harvest `.rs`/`.md` embeds to the index, mirror `.stella/` natives
+    into the declared capsule(s), ingest the staging shape if present.
+  - `sync --capsule <name>` — explicit target: the undeclared-home shape
+    (a directory with only `.stella/`). This is how staging syncs.
   - `sync --status` — the constellation report.
+  - `export --capsule <name> --out <dir>` — capsule → files (legacy-exit
+    primitive, read-only).
   - `doctor` — storage-side validation (heavy): lint capsule-resident
     entries, check storage invariants. The counterpart of `stella lint`.
 - **create is retired.** `stellario write`/`expand-new` are removed (or
