@@ -13,6 +13,7 @@ pub mod config;
 pub mod constellation;
 pub mod export;
 pub mod harvest;
+pub mod hints;
 pub mod identity;
 pub mod index;
 pub mod lint;

@@ -136,10 +136,10 @@ fn run_query(index_path: &PathBuf, query: &str, intent: &str, kind: Option<Kind>
     let terms: Vec<&str> = query.split_whitespace().collect();
     let mut scored: std::collections::HashMap<String, (EntryRow, f64)> = std::collections::HashMap::new();
 
-    for row in rows {
-        let s = fzf_score(&row, &terms);
+    for row in &rows {
+        let s = fzf_score(row, &terms);
         if s > 0.0 {
-            scored.insert(row.id.clone(), (row, s));
+            scored.insert(row.id.clone(), (row.clone(), s));
         }
     }
 
@@ -169,6 +169,16 @@ fn run_query(index_path: &PathBuf, query: &str, intent: &str, kind: Option<Kind>
     let mut hits: Vec<(EntryRow, f64)> = scored.into_values().collect();
     hits.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     hits.truncate(limit);
+
+    // The guide layer: hints at the top (max 3, read-first, pure reads).
+    let hints = stellario::hints::query_hints(&idx, &rows, &hits, query, intent, limit);
+    if !hints.is_empty() {
+        println!("Hints");
+        for h in &hints {
+            println!("  · {}", h.text);
+        }
+        println!("  {}", "-".repeat(28));
+    }
 
     index::log_intent(index_path, intent, query, match kind {
         Some(Kind::Repo) => "repo",
@@ -225,6 +235,15 @@ fn run_show(index_path: &PathBuf, id: &str) -> Result<()> {
             }
         }
         return Ok(());
+    }
+
+    let hints = stellario::hints::show_hints(&idx, exact[0]);
+    if !hints.is_empty() {
+        println!("Hints");
+        for h in &hints {
+            println!("  · {}", h.text);
+        }
+        println!("  {}", "-".repeat(28));
     }
 
     for row in exact {
