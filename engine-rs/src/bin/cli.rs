@@ -139,6 +139,13 @@ enum Cmd {
         #[arg(long)]
         status: bool,
     },
+    /// Export the capsule to files (legacy-exit primitive): read-only dump
+    /// of every entry as <out>/<volume>/<id>.md + manifest.jsonl.
+    Export {
+        /// Output directory (created if missing).
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// Delete an entry (supersede to tombstone). Disappears from search, stays in lineage.
     Delete {
         /// Entry id (volume:n).
@@ -487,6 +494,20 @@ fn main() -> Result<()> {
                     }
                 }
             }
+        }
+
+        Cmd::Export { out } => {
+            let capsule_name = resolve_capsule_name(&cli);
+            let (name, storage) = load_capsule(Some(&capsule_name))?;
+            let stats = stellario::export::export_capsule(&storage, &out)?;
+            println!(
+                "exported capsule '{}': {} volumes, {} entries, {} bytes -> {}",
+                name,
+                stats.volumes,
+                stats.entries,
+                stats.bytes,
+                out.display()
+            );
         }
 
         Cmd::Delete { id, author, intent } => {

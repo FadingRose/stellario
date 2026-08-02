@@ -10,6 +10,7 @@
 //!   migrate  — JSONL → version-graph migration (phase-0 risk gate)
 
 pub mod constellation;
+pub mod export;
 pub mod harvest;
 pub mod identity;
 pub mod index;
