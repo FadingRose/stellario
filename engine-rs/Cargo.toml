@@ -25,6 +25,7 @@ hex = "0.4"
 fastembed = "4"
 # SIGPIPE reset (product surface: `stella ... | head` must not panic).
 libc = "0.2"
+regex = "1"
 # Index plane (Phase 4) — embedded single-file vector store.
 rusqlite = { version = "0.32", features = ["bundled"] }
 sqlite-vec = "0.1"

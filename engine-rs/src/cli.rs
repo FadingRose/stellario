@@ -157,6 +157,11 @@ enum Cmd {
         out: PathBuf,
     },
 
+    /// Identify design-thread clusters in a volume (distill candidates).
+    Cluster {
+        /// Volume to scan (e.g. layer).
+        volume: String,
+    },
     /// List available project capsules.
     List,
     /// Search entries (fzf + semantic) — legacy telescope surface.
@@ -617,6 +622,12 @@ pub fn run() -> Result<()> {
             if report.error_count() > 0 {
                 std::process::exit(1);
             }
+            Ok(())
+        }
+        Some(Cmd::Cluster { volume }) => {
+            let (_name, storage) = load_capsule(cli.capsule.as_deref())?;
+            let clusters = crate::cluster::identify(&storage, volume)?;
+            print!("{}", crate::cluster::format_clusters(&clusters));
             Ok(())
         }
         Some(Cmd::List) => {

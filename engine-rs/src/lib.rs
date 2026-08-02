@@ -11,6 +11,7 @@
 
 pub mod config;
 pub mod cli;
+pub mod cluster;
 pub mod constellation;
 pub mod export;
 pub mod govern;
