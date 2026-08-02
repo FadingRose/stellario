@@ -81,6 +81,9 @@ struct Cli {
     /// Include star drafts (excluded by default).
     #[arg(long)]
     stars: bool,
+    /// Include sealed legacy history (excluded by default).
+    #[arg(long)]
+    sealed: bool,
     /// Max results (default 20).
     #[arg(long)]
     limit: Option<usize>,
@@ -415,7 +418,7 @@ fn fzf_score(row: &crate::index::EntryRow, terms: &[&str]) -> f64 {
     total
 }
 
-fn run_query(cli: &Cli, query: &str, intent: &str, kind: Option<crate::index::Kind>, limit: usize, include_stars: bool) -> Result<()> {
+fn run_query(cli: &Cli, query: &str, intent: &str, kind: Option<crate::index::Kind>, limit: usize, include_stars: bool, include_sealed: bool) -> Result<()> {
     let index_path = index_path(cli);
     let idx = crate::index::Index::open(&index_path)?;
 
@@ -837,7 +840,7 @@ pub fn run() -> Result<()> {
                     (false, true) => Some(crate::index::Kind::Memory),
                     _ => None,
                 };
-                run_query(&cli, q, i, kind, cli.limit.unwrap_or(20), cli.stars)
+                run_query(&cli, q, i, kind, cli.limit.unwrap_or(20), cli.stars, cli.sealed)
             }
             (Some(_), None) => {
                 eprintln!("intent is mandatory: stella <query> <intent> [--repo] [--memory]");

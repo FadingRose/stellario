@@ -175,7 +175,10 @@ pub fn doctor(
                         .content
                         .starts_with("(migrated to")
                         || entry.content.starts_with("(deleted)");
-                    if !migrated && !distilled.contains(&full) {
+                    // Sealed entries are history, not pending distillation.
+                    if !crate::index::is_sealed(&vol, &entry.content)
+                        && !migrated
+                        && !distilled.contains(&full) {
                         undistilled.entry((cap.clone(), vol.clone()))
                             .and_modify(|(c, sample)| {
                                 *c += 1;

@@ -66,7 +66,7 @@ pub fn classify_intent(intent: &str) -> IntentClass {
 
 /// Is this a legacy entry (capsule volume:id, not yet distilled)?
 pub fn is_legacy(row: &EntryRow) -> bool {
-    row.kind == Kind::Memory && row.id.contains(':')
+    row.kind == Kind::Memory && row.id.contains(':') && row.form != crate::parse::Form::Sealed
 }
 
 /// Does the entry carry walls (negation bullets) in its indexed content?

@@ -20,6 +20,20 @@ use crate::storage::Storage;
 
 pub const EMBEDDING_DIM: usize = 384;
 
+/// Volumes whose entries are execution records, not knowledge — sealed.
+const SEALED_VOLUMES: &[&str] = &["task", "arc", "archived"];
+
+/// Is this memory entry sealed? Derived from the capsule's own structure
+/// (volume + content markers) — never stored, so reindexing preserves it.
+/// Content markers catch migrated/disabled/superseded dead pointers.
+pub fn is_sealed(volume: &str, content: &str) -> bool {
+    if SEALED_VOLUMES.contains(&volume) {
+        return true;
+    }
+    let c = content.trim_start();
+    c.starts_with("> DISABLED") || c.starts_with("> Superseded") || c.starts_with("Superseded by")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Repo,
@@ -221,6 +235,7 @@ impl Index {
                 form: match form_str.as_str() {
                     "native" => Form::Native,
                     "star" => Form::Star,
+                    "sealed" => Form::Sealed,
                     _ => Form::Embed,
                 },
                 id: r.get(1)?,
@@ -305,6 +320,11 @@ pub fn ingest_memory<S: Storage + ?Sized>(
             } else {
                 entry.id.clone()
             };
+            let form = if crate::index::is_sealed(&vol, &entry.content) {
+                Form::Sealed
+            } else {
+                Form::Native
+            };
             let title = entry
                 .content
                 .lines()
@@ -318,7 +338,7 @@ pub fn ingest_memory<S: Storage + ?Sized>(
                 tags: entry.tags.clone(),
                 keywords: entry.keywords.clone(),
                 span: capsule.to_string(),
-                form: Form::Native,
+                form,
             });
             all_keywords.extend(entry.keywords.clone());
         }

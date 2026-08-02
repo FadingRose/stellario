@@ -21,6 +21,9 @@ pub enum Form {
     Native,
     /// A `<slug>.<star>` draft — loose form, excluded from default view.
     Star,
+    /// Sealed legacy history — excluded from the default view; the state
+    /// is DERIVED at ingest (volume rule + content markers), never stored.
+    Sealed,
 }
 
 impl Form {
@@ -29,6 +32,7 @@ impl Form {
             Form::Embed => "embed",
             Form::Native => "native",
             Form::Star => "star",
+            Form::Sealed => "sealed",
         }
     }
 }
