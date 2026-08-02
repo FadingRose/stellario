@@ -9,6 +9,7 @@
 //!   storage  — Storage trait + AutomergeStorage impl (the meaning plane)
 //!   migrate  — JSONL → version-graph migration (phase-0 risk gate)
 
+pub mod config;
 pub mod constellation;
 pub mod export;
 pub mod harvest;

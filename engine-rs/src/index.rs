@@ -297,6 +297,14 @@ pub fn ingest_memory<S: Storage + ?Sized>(
     for vol in storage.volume_names()? {
         for id in storage.list(&vol)? {
             let Some(entry) = storage.materialize(&vol, &id)? else { continue };
+            // The native volume's entries carry the slug as their identity —
+            // strip the legacy "native:" prefix so index ids match the
+            // constellation's slug ids (one slug = one row).
+            let entry_id = if vol == crate::harvest::NATIVE_VOLUME {
+                entry.id.trim_start_matches("native:").to_string()
+            } else {
+                entry.id.clone()
+            };
             let title = entry
                 .content
                 .lines()
@@ -304,7 +312,7 @@ pub fn ingest_memory<S: Storage + ?Sized>(
                 .map(|l| l.trim_start_matches('#').trim().to_string())
                 .unwrap_or_else(|| entry.content.chars().take(80).collect());
             rows.push(IndexEntry {
-                id: entry.id.clone(),
+                id: entry_id,
                 title,
                 content: entry.content.clone(),
                 tags: entry.tags.clone(),

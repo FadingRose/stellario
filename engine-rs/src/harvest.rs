@@ -16,6 +16,11 @@ use std::process::Command;
 use anyhow::Result;
 
 use crate::parse::{self, Block, Form, Line};
+use crate::storage::Storage;
+use crate::{Edge, EdgeKind};
+
+/// The capsule volume that holds native (slug) entries.
+pub const NATIVE_VOLUME: &str = "native";
 
 /// One repo entry, shaped for the index.
 #[derive(Debug, Clone)]
@@ -197,6 +202,75 @@ pub fn harvest(paths: &[PathBuf]) -> Result<(Vec<HarvestedEntry>, PathBuf)> {
         }
     }
     Ok((entries, repo_root))
+}
+
+/// Mirror `.stella` natives from a creation surface into the capsule
+/// (constellation §3.6-3.7): create v1 or supersede vN+1 per slug.
+///
+/// Lint gate: only lint-passing shapes enter the truth store — invalid
+/// slugs are reported and skipped (never ingested). The capsule stores the
+/// full `.stella` text as content; tags/keywords come from the block.
+pub fn mirror_natives_to_capsule<S: Storage + ?Sized>(
+    storage: &mut S,
+    creation_dir: &Path,
+    author: &str,
+) -> Result<Vec<String>> {
+    let mut synced = Vec::new();
+    let Ok(entries) = fs::read_dir(creation_dir) else { return Ok(synced) };
+    let mut files: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("stella"))
+        .collect();
+    files.sort();
+    for file in files {
+        let Ok(content) = fs::read_to_string(&file) else { continue };
+        let outcome = parse::extract_blocks(&file, parse::Host::Markdown, &content);
+        let Some(block) = outcome.blocks.first() else { continue };
+        let Some(slug) = block.slug() else { continue };
+        if !crate::lint::valid_slug(&slug) {
+            eprintln!("  [mirror] skip {}: invalid slug {slug:?}", file.display());
+            continue;
+        }
+        let tags = block.string_list("tags");
+        let keywords = block.string_list("keywords");
+        let prev = storage.materialize(NATIVE_VOLUME, &slug)?;
+        // No-op guard: re-mirroring unchanged content must not append a
+        // version — a supersede of the only version would tombstone the
+        // entry (write() would mark prev superseded with no successor).
+        if let Some(p) = &prev {
+            if p.content == content {
+                continue;
+            }
+        }
+        let intent = if prev.is_some() {
+            "repo edit: synced from .stella"
+        } else {
+            "created: synced from .stella"
+        };
+        let edges = match prev {
+            Some(p) => vec![Edge {
+                from: String::new(),
+                to: p.hash,
+                kind: EdgeKind::Supersede,
+                reason: intent.to_string(),
+            }],
+            None => Vec::new(),
+        };
+        storage.write(
+            NATIVE_VOLUME,
+            Some(&slug),
+            &content,
+            &tags,
+            &keywords,
+            author,
+            intent,
+            &[],
+            &edges,
+        )?;
+        synced.push(slug);
+    }
+    Ok(synced)
 }
 
 #[cfg(test)]

@@ -77,7 +77,7 @@ const KNOWN_FIELDS: &[&str] = &[
 const WALL_TYPES: &[&str] = &["not", "traps", "warning"];
 
 /// Slug: 3–5 lowercase alphanumeric words joined by single hyphens.
-fn valid_slug(slug: &str) -> bool {
+pub fn valid_slug(slug: &str) -> bool {
     let parts: Vec<&str> = slug.split('-').collect();
     if !(3..=5).contains(&parts.len()) {
         return false;

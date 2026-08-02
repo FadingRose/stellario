@@ -329,8 +329,27 @@ impl Storage for AutomergeStorage {
         let hash = Version::compute_hash(content, tags, keywords);
 
         // If this exact content is already stored, the version exists; still
-        // record the edge (idempotent write of the same state).
-        let already = self.read_version(&hash)?.is_some();
+        // record the edge (idempotent write of the same state). Exception:
+        // a superseded version of this content is re-written → revive it
+        // (content-addressed revive). Without this, a no-op re-mirror that
+        // hit the supersede path would tombstone the entry permanently.
+        let existing = self.read_version(&hash)?;
+        let already = existing.is_some();
+        if let Some(v) = &existing {
+            if v.superseded {
+                self.doc.put(&{
+                    let (_, versions_map) = self
+                        .doc
+                        .get(automerge::ROOT, "versions")?
+                        .ok_or_else(|| anyhow!("versions map missing"))?;
+                    let (_, vobj) = self
+                        .doc
+                        .get(&versions_map, &hash)?
+                        .ok_or_else(|| anyhow!("version missing"))?;
+                    vobj
+                }, "superseded", false)?;
+            }
+        }
         if !already {
             let v = Version {
                 hash: hash.clone(),

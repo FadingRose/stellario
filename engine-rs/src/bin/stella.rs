@@ -114,11 +114,24 @@ fn fzf_score(row: &EntryRow, terms: &[&str]) -> f64 {
 
 fn run_query(index_path: &PathBuf, query: &str, intent: &str, kind: Option<Kind>, limit: usize, include_stars: bool) -> Result<()> {
     let idx = Index::open(index_path)?;
-    let rows: Vec<EntryRow> = idx
-        .entries(kind)?
-        .into_iter()
-        .filter(|r| include_stars || r.form != Form::Star)
-        .collect();
+    let mut dedup: std::collections::HashMap<String, EntryRow> = std::collections::HashMap::new();
+    for row in idx.entries(kind)? {
+        if !include_stars && row.form == Form::Star {
+            continue;
+        }
+        // One row per slug (final topology: a slug exists once in the index).
+        // Prefer memory — post-sync capsule truth — over a repo/native row.
+        match dedup.get(&row.id) {
+            Some(existing) if row.kind == Kind::Memory && existing.kind == Kind::Repo => {
+                dedup.insert(row.id.clone(), row);
+            }
+            Some(_) => {}
+            None => {
+                dedup.insert(row.id.clone(), row);
+            }
+        }
+    }
+    let rows: Vec<EntryRow> = dedup.into_values().collect();
 
     let terms: Vec<&str> = query.split_whitespace().collect();
     let mut scored: std::collections::HashMap<String, (EntryRow, f64)> = std::collections::HashMap::new();
@@ -226,9 +239,23 @@ fn run_show(index_path: &PathBuf, id: &str) -> Result<()> {
         }
         println!();
         match row.kind {
-            Kind::Repo => {
+            Kind::Repo if row.form == Form::Embed => {
                 let file = row.span.split(':').next().unwrap_or("");
-                println!("  → authority: {file} (the block binds the prose beside it; the index is a copy, the file is the truth)");
+                println!("  → authority: {file} — inline truth, bound to the code; the index is a copy");
+            }
+            Kind::Repo => {
+                // native: capsule is truth after sync; pre-sync the file still is
+                let memory_ids: Vec<String> = idx
+                    .entries(Some(Kind::Memory))?
+                    .into_iter()
+                    .map(|r| r.id)
+                    .collect();
+                if memory_ids.iter().any(|id| id == &row.id) {
+                    println!("  → authority: capsule (synced) — `stellario lineage {} --capsule {}` for history", row.id, row.source);
+                } else {
+                    let file = row.span.split(':').next().unwrap_or(&row.span);
+                    println!("  → authority: {file} (pre-sync — not yet mirrored into a capsule)", );
+                }
             }
             Kind::Memory => {
                 println!("  → authority: capsule '{}' — `stellario show {} --capsule {}` for raw, `stellario lineage {} --capsule {}` for history",

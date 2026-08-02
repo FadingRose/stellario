@@ -12,7 +12,7 @@
 //!
 //! `--capsule` defaults to the first available project capsule.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -224,6 +224,105 @@ fn extract_title(content: &str) -> String {
     content.lines().next().unwrap_or("").chars().take(60).collect()
 }
 
+
+/// Harvest <stellario> blocks from repo paths into the index (embeds +
+/// natives). Read-only on the repo; scoped replacement per scanned path.
+fn harvest_to_index(repo_paths: &[PathBuf], index_path: &Path) -> Result<()> {
+    let (entries, root) = stellario::harvest::harvest(repo_paths)?;
+    let index = stellario::index::Index::open(index_path)?;
+
+    let all_kw: Vec<String> = entries.iter().flat_map(|e| e.keywords.clone()).collect();
+    let vecs = stellario::telescope::embed_texts(&all_kw);
+    let mut kw_iter = all_kw.iter();
+    let mut vec_iter = vecs.as_ref().map(|v| v.iter());
+
+    let mut shaped = Vec::new();
+    for e in &entries {
+        let n = e.keywords.len();
+        let kws: Vec<String> = kw_iter.by_ref().take(n).cloned().collect();
+        let ev: Vec<(String, Vec<f32>)> = match &mut vec_iter {
+            Some(vi) => kws.into_iter().zip(vi.by_ref().take(n).cloned()).collect(),
+            None => Vec::new(),
+        };
+        // Content = tldr + bound prose + walls — what fzf scores.
+        let mut content = e.title.clone();
+        if !e.description.is_empty() {
+            content.push('\n');
+            content.push_str(&e.description);
+        }
+        if !e.walls.is_empty() {
+            content.push('\n');
+            content.push_str(&e.walls.join("\n"));
+        }
+        shaped.push((
+            stellario::index::IndexEntry {
+                id: e.id.clone(),
+                title: e.title.clone(),
+                content,
+                tags: e.tags.clone(),
+                keywords: e.keywords.clone(),
+                span: e.span.clone(),
+                form: e.form,
+            },
+            ev,
+        ));
+    }
+    let source = root.display().to_string();
+    let prefixes: Vec<String> = repo_paths
+        .iter()
+        .map(|p| {
+            let canon = p.canonicalize().unwrap_or_else(|_| p.clone());
+            canon
+                .strip_prefix(&root)
+                .map(|r| r.display().to_string())
+                .unwrap_or_else(|_| p.display().to_string())
+        })
+        .collect();
+    let n = index.replace_repo_scoped(&source, &prefixes, &shaped)?;
+    println!("repo harvest: {} entries from {} -> index {}", n, source, index_path.display());
+    if vecs.is_none() {
+        println!("note: embeddings unavailable — semantic signal skipped (fzf still works)");
+    }
+    Ok(())
+}
+
+/// Mirror .stella natives from a repo's creation surface into the capsule(s)
+/// its `.stellario` config declares (constellation §3.7 — self-declared home).
+fn mirror_declared(repo_paths: &[PathBuf], index_path: &Path) -> Result<()> {
+    for p in repo_paths {
+        let Some((dir, cfg)) = stellario::config::discover(p) else { continue };
+        let creation = dir.join(&cfg.creation_dir);
+        if !creation.is_dir() {
+            continue;
+        }
+        if cfg.capsules.is_empty() {
+            eprintln!("  [sync] {} declares .stellario but no capsules — nothing to mirror", dir.display());
+            continue;
+        }
+        for cap in &cfg.capsules {
+            let path = project_capsule_path(cap)
+                .ok_or_else(|| anyhow!("capsule '{}' not found", cap))?;
+            let bytes = std::fs::read(&path)?;
+            let mut storage = AutomergeStorage::load(&bytes)?;
+            let synced = stellario::harvest::mirror_natives_to_capsule(&mut storage, &creation, "stellario")?;
+            if !synced.is_empty() {
+                let new_bytes = storage.save()?;
+                std::fs::write(&path, &new_bytes)?;
+                println!("mirror: {} natives from {} -> capsule '{}'", synced.len(), creation.display(), cap);
+                // Reindex the capsule so the index sees the new/updated natives.
+                let index = stellario::index::Index::open(index_path)?;
+                let n = stellario::index::ingest_memory(&index, cap, &storage, &|texts| {
+                    stellario::telescope::embed_texts(texts)
+                })?;
+                println!("memory reindex: {} entries from capsule '{}' -> index", n, cap);
+            } else {
+                println!("mirror: nothing new in {}", creation.display());
+            }
+        }
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -396,66 +495,12 @@ fn main() -> Result<()> {
                 .or_else(|| std::env::var("STELLA_INDEX").ok().map(PathBuf::from))
                 .unwrap_or_else(stellario::index::default_path);
 
-            // ── repo harvest → index (read-only; stellario = sync plane) ──
+            // ── explicit --repo: harvest to index + mirror declared natives ──
             if !repo.is_empty() {
-                let (entries, root) = stellario::harvest::harvest(&repo)?;
-                let index = stellario::index::Index::open(&index_path)?;
-
-                let all_kw: Vec<String> = entries.iter().flat_map(|e| e.keywords.clone()).collect();
-                let vecs = stellario::telescope::embed_texts(&all_kw);
-                let mut kw_iter = all_kw.iter();
-                let mut vec_iter = vecs.as_ref().map(|v| v.iter());
-
-                let mut shaped = Vec::new();
-                for e in &entries {
-                    let n = e.keywords.len();
-                    let kws: Vec<String> = kw_iter.by_ref().take(n).cloned().collect();
-                    let ev: Vec<(String, Vec<f32>)> = match &mut vec_iter {
-                        Some(vi) => kws.into_iter().zip(vi.by_ref().take(n).cloned()).collect(),
-                        None => Vec::new(),
-                    };
-                    // Content = tldr + bound prose + walls — what fzf scores.
-                    let mut content = e.title.clone();
-                    if !e.description.is_empty() {
-                        content.push('\n');
-                        content.push_str(&e.description);
-                    }
-                    if !e.walls.is_empty() {
-                        content.push('\n');
-                        content.push_str(&e.walls.join("\n"));
-                    }
-                    shaped.push((
-                        stellario::index::IndexEntry {
-                            id: e.id.clone(),
-                            title: e.title.clone(),
-                            content,
-                            tags: e.tags.clone(),
-                            keywords: e.keywords.clone(),
-                            span: e.span.clone(),
-                            form: e.form,
-                        },
-                        ev,
-                    ));
-                }
-                let source = root.display().to_string();
-                let prefixes: Vec<String> = repo
-                    .iter()
-                    .map(|p| {
-                        let canon = p.canonicalize().unwrap_or_else(|_| p.clone());
-                        canon
-                            .strip_prefix(&root)
-                            .map(|r| r.display().to_string())
-                            .unwrap_or_else(|_| p.display().to_string())
-                    })
-                    .collect();
-                let n = index.replace_repo_scoped(&source, &prefixes, &shaped)?;
-                println!("repo harvest: {} entries from {} -> index {}", n, source, index_path.display());
-                if vecs.is_none() {
-                    println!("note: embeddings unavailable — semantic signal skipped (fzf still works)");
-                }
+                harvest_to_index(&repo, &index_path)?;
+                mirror_declared(&repo, &index_path)?;
                 return Ok(());
             }
-
             // ── memory reindex (read-only on the capsule) ──
             if *reindex_memory {
                 let capsule_name = resolve_capsule_name(&cli);
@@ -465,6 +510,49 @@ fn main() -> Result<()> {
                     stellario::telescope::embed_texts(texts)
                 })?;
                 println!("memory reindex: {} entries from capsule '{}' -> index {}", n, capsule_name, index_path.display());
+                return Ok(());
+            }
+
+
+            // ── shape-aware sync (no flags): the directory declares its own
+            //    semantics by its file layout (constellation §3.7) ──
+            debug_assert!(!*reindex_memory, "reindex branch must precede shape-aware sync");
+            {
+                let cwd = std::env::current_dir()?;
+                if let Some((dir, cfg)) = stellario::config::discover(&cwd) {
+                    // self-declared home: harvest embeds + mirror natives
+                    harvest_to_index(&[dir.clone()], &index_path)?;
+                    mirror_declared(&[dir.clone()], &index_path)?;
+                    let _ = cfg;
+                    return Ok(());
+                }
+                if stellario::config::is_staging_shape(&cwd) {
+                    // undeclared home — staging shape: sync must be told where
+                    let cap = cli.capsule.clone()
+                        .ok_or_else(|| anyhow!("undeclared home (staging shape): pass --capsule <name> to choose the target"))?;
+                    let path = project_capsule_path(&cap)
+                        .ok_or_else(|| anyhow!("capsule '{}' not found", cap))?;
+                    let bytes = std::fs::read(&path)?;
+                    let mut storage = AutomergeStorage::load(&bytes)?;
+                    let creation = cwd.join(stellario::config::DEFAULT_CREATION_DIR);
+                    let synced = stellario::harvest::mirror_natives_to_capsule(&mut storage, &creation, "stellario")?;
+                    if !synced.is_empty() {
+                        let new_bytes = storage.save()?;
+                        std::fs::write(&path, &new_bytes)?;
+                        println!("mirror: {} natives from {} -> capsule '{}'", synced.len(), creation.display(), cap);
+                        let index = stellario::index::Index::open(&index_path)?;
+                        let n = stellario::index::ingest_memory(&index, &cap, &storage, &|texts| {
+                            stellario::telescope::embed_texts(texts)
+                        })?;
+                        println!("memory reindex: {} entries from capsule '{}' -> index", n, cap);
+                    } else {
+                        println!("mirror: nothing new in {}", creation.display());
+                    }
+                    return Ok(());
+                }
+                eprintln!("no stellario shape here (no .stellario config, no .stella/ directory).");
+                eprintln!("  repo-bound:   add a .stellario declaring your capsule, then re-run");
+                eprintln!("  staging:      add .stella/ and pass --capsule <name>");
                 return Ok(());
             }
 
