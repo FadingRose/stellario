@@ -2922,6 +2922,7 @@ dependencies = [
  "clap",
  "fastembed",
  "hex",
+ "libc",
  "rmcp",
  "rusqlite",
  "schemars",

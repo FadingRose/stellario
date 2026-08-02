@@ -10,6 +10,7 @@
 //!   migrate  — JSONL → version-graph migration (phase-0 risk gate)
 
 pub mod config;
+pub mod cli;
 pub mod constellation;
 pub mod export;
 pub mod govern;
