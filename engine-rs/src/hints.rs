@@ -273,6 +273,7 @@ fn truncate(mut hints: Vec<Hint>) -> Vec<Hint> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parse::Form;
 
     fn row(id: &str, kind: Kind, tags: &[&str], content: &str) -> EntryRow {
         EntryRow {
