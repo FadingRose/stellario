@@ -157,6 +157,30 @@ enum Cmd {
     },
 }
 
+/// Create a capsule on first use — a sync side effect, not a create
+/// ceremony. The capsule emerges from sync targeting it (constellation
+/// final topology: structure is discovered from writing, not declared).
+fn ensure_capsule(name: &str) -> Result<PathBuf> {
+    if let Some(p) = project_capsule_path(name) {
+        return Ok(p);
+    }
+    let device = std::process::Command::new("hostname")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "local".into());
+    let dir = stellario_root().join("projects").join(name).join(device);
+    std::fs::create_dir_all(&dir)?;
+    let mut storage = AutomergeStorage::new();
+    let bytes = storage.save()?;
+    let path = dir.join("capsule.automerge");
+    std::fs::write(&path, &bytes)?;
+    println!("capsule created: {} ({})", name, path.display());
+    Ok(path)
+}
+
 fn stellario_root() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home).join(".stellario")
@@ -300,8 +324,7 @@ fn mirror_declared(repo_paths: &[PathBuf], index_path: &Path) -> Result<()> {
             continue;
         }
         for cap in &cfg.capsules {
-            let path = project_capsule_path(cap)
-                .ok_or_else(|| anyhow!("capsule '{}' not found", cap))?;
+            let path = ensure_capsule(cap)?;
             let bytes = std::fs::read(&path)?;
             let mut storage = AutomergeStorage::load(&bytes)?;
             let synced = stellario::harvest::mirror_natives_to_capsule(&mut storage, &creation, "stellario")?;
@@ -527,11 +550,11 @@ fn main() -> Result<()> {
                     return Ok(());
                 }
                 if stellario::config::is_staging_shape(&cwd) {
-                    // undeclared home — staging shape: sync must be told where
-                    let cap = cli.capsule.clone()
-                        .ok_or_else(|| anyhow!("undeclared home (staging shape): pass --capsule <name> to choose the target"))?;
-                    let path = project_capsule_path(&cap)
-                        .ok_or_else(|| anyhow!("capsule '{}' not found", cap))?;
+                    // undeclared home — staging shape: sync must be told where.
+                    // No --capsule → the scratch inbox (created on first use):
+                    // capture-anything path with zero ceremony.
+                    let cap = cli.capsule.clone().unwrap_or_else(|| "scratch".into());
+                    let path = ensure_capsule(&cap)?;
                     let bytes = std::fs::read(&path)?;
                     let mut storage = AutomergeStorage::load(&bytes)?;
                     let creation = cwd.join(stellario::config::DEFAULT_CREATION_DIR);
