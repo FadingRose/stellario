@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Unified tool surface** — one binary, five verb classes (query / write
+  loop / lint / governance / storage). `stellario` is an alias for `stella`.
+- **Agent skill** — `skills/stellario/`, the open SKILL.md format, written
+  against its own 8-criterion quality framework (first skill in the wild
+  with a `verified-against` freshness marker).
+- **Constellation model** — native `.stella` entries, star drafts, collection,
+  demotion, vacant heads; capsules emerge from sync (no create ceremony).
+- **Governance** — `doctor` (graded health: error/warning/info) and
+  `migrate` (relocation with provenance).
+- **Capsule export** — legacy-exit primitive (`export --capsule --out`).
+
+### Changed
+- Removed the TS layer entirely; the Rust CLI is the only surface.
+- Removed retired edit-loop verbs (write / expand / expand-new / delete).
+- v0.1.0 -> v0.2.0 (pre-1.0; MINOR may break — API not frozen).
+
 ## [1.0.0-beta.1] - 2026-06-18
 
 Major architecture cleanup. Breaking changes — existing configs may need updates.
