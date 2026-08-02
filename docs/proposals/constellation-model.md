@@ -88,6 +88,45 @@ would be ceremony without information. Lint treats it as optional for
 gitignore: `.stella/*` with `!.stella/*.stella` — canonicals are tracked,
 stars are not.
 
+### 3.6 Three planes, one authority rule
+
+Storage, index, and edit are separate planes with non-overlapping
+lifecycles:
+
+| Plane | Holds | Authority |
+|-------|-------|-----------|
+| storage (automerge capsule) | entry versions + version graph | **truth** — append-only, replayable |
+| index (index.db) | projected rows + anchor vectors | none — derived, rebuildable |
+| edit (files: work copies, staging, repo `.stella`) | working surface | none — transient (pre-sync files excepted) |
+
+All plane transitions are explicit tool acts (sync / reindex / expand /
+export); none is magic. Index is never edited; capsule is never edited
+directly; edits always happen on files.
+
+**Authority by residence** (resolves the dual-residency question):
+
+- **embed blocks** (inline markers in `.rs`/`.md`): truth stays with the
+  inlined part — the file. The knowledge is bound to the code; the code is
+  the truth.
+- **self-contained `<slug>.stella` files**: after sync, the **capsule is
+  the single truth**; the repo file is an edit/review surface (git-tracked
+  for review, never authoritative). Pre-sync, the file is still the truth;
+  sync is the moment truth migrates to the capsule.
+
+Consequence for `stella show`: the authority pointer is per-residence —
+repo/embed hits point at the file; repo/native hits point at the capsule
+(post-sync); memory hits point at the capsule + lineage.
+
+### 3.7 lint vs doctor — validation split
+
+`stella lint` scans the **edit plane only** (files): stella faces the
+currently visible environment. Capsule-resident entries are linted by a
+heavy, storage-side entry point — `stellario doctor` — which reads the
+capsule, materializes entries, and validates them with the same grammar
+(plus storage invariants: dangling refs, vacant heads, stale collections).
+The split is deliberate: stella stays light and context-local; the whole-
+corpus check is a deliberate, heavier act.
+
 ### 3.2 Star drafts: `<slug>.<star>`
 
 A draft is a star in a slug's constellation: `<slug>.sirius`,
@@ -174,13 +213,15 @@ nobody is forced to see is a report that decays.
 ## 4. CLI Consequences
 
 - `stella` — query, lint, show (unchanged; gains constellation side-notes
-  and a `--stars` flag).
+  and a `--stars` flag). Lint scans the edit plane (files) only.
 - `stellario` — **sync only**:
   - `sync --repo <path>` harvests embed blocks (existing) **and native
     `.stella` entries** (this proposal).
   - `sync --capsule` carries `.stella` files ↔ capsule (native entries and
     stars — drafts survive sessions without git).
   - `sync --status` — the constellation report.
+  - `doctor` — storage-side validation (heavy): lint capsule-resident
+    entries, check storage invariants. The counterpart of `stella lint`.
 - **create is retired.** `stellario write`/`expand-new` are removed (or
   gated behind `--dangerous` during transition). Authoring happens in
   editors, as files. Create was never an API — it was always "write a
