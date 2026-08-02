@@ -54,6 +54,7 @@ ONE TOOL, FIVE VERB CLASSES
 #[derive(Parser)]
 #[command(
     name = "stella",
+    version,
     about = "stellario — one tool: hybrid search, the write loop, and governance",
     after_help = USAGE_GUIDE
 )]
