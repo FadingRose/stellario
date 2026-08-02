@@ -114,24 +114,32 @@ fn fzf_score(row: &EntryRow, terms: &[&str]) -> f64 {
 
 fn run_query(index_path: &PathBuf, query: &str, intent: &str, kind: Option<Kind>, limit: usize, include_stars: bool) -> Result<()> {
     let idx = Index::open(index_path)?;
-    let mut dedup: std::collections::HashMap<String, EntryRow> = std::collections::HashMap::new();
+    // One row per slug — but only for mirror pairs (repo/native mirrored into
+    // a memory/native row). repo/embed rows are file truth at a DIFFERENT
+    // residence: a slug may legitimately be both an inline embed and a
+    // capsule native — both rows survive. Dedupe drops the repo/native row
+    // when its memory twin exists (post-sync capsule truth wins).
+    let mut by_id: std::collections::HashMap<String, Vec<EntryRow>> = std::collections::HashMap::new();
     for row in idx.entries(kind)? {
         if !include_stars && row.form == Form::Star {
             continue;
         }
-        // One row per slug (final topology: a slug exists once in the index).
-        // Prefer memory — post-sync capsule truth — over a repo/native row.
-        match dedup.get(&row.id) {
-            Some(existing) if row.kind == Kind::Memory && existing.kind == Kind::Repo => {
-                dedup.insert(row.id.clone(), row);
-            }
-            Some(_) => {}
-            None => {
-                dedup.insert(row.id.clone(), row);
+        by_id.entry(row.id.clone()).or_default().push(row);
+    }
+    let mut rows: Vec<EntryRow> = Vec::new();
+    for (_, group) in by_id {
+        let has_memory_native = group
+            .iter()
+            .any(|r| r.kind == Kind::Memory && r.form == Form::Native);
+        for row in group {
+            let is_repo_native_twin = row.kind == Kind::Repo
+                && row.form == Form::Native
+                && has_memory_native;
+            if !is_repo_native_twin {
+                rows.push(row);
             }
         }
     }
-    let rows: Vec<EntryRow> = dedup.into_values().collect();
 
     let terms: Vec<&str> = query.split_whitespace().collect();
     let mut scored: std::collections::HashMap<String, (EntryRow, f64)> = std::collections::HashMap::new();

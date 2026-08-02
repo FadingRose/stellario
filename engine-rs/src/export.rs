@@ -117,6 +117,19 @@ mod tests {
     }
 
     #[test]
+    fn idempotent_write_does_not_double_timeline() {
+        // M3 regression: re-writing identical content must not append the
+        // hash twice or mint a self-parent edge — lineage stays clean.
+        let mut s = AutomergeStorage::new();
+        s.write("layer", Some("1"), "## X", &[], &[], "a", "one", &[], &[]).unwrap();
+        s.write("layer", Some("1"), "## X", &[], &[], "a", "two", &[], &[]).unwrap();
+        let lin = s.lineage("layer", "1").unwrap();
+        assert_eq!(lin.len(), 1, "idempotent write must not append to the timeline");
+        let entry = s.materialize("layer", "1").unwrap().unwrap();
+        assert_eq!(entry.content, "## X");
+    }
+
+    #[test]
     fn export_roundtrip() {
         let s = seed();
         let dir = std::env::temp_dir().join(format!("stella-export-test-{}", std::process::id()));

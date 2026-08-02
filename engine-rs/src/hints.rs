@@ -81,9 +81,14 @@ fn has_walls(row: &EntryRow) -> bool {
 /// Task/issue-id shaped query — a zero-hit here is a lookup failure, not a
 /// knowledge gap (creation must not be suggested).
 fn is_lookup_id(query: &str) -> bool {
-    query
-        .split_whitespace()
-        .any(|t| t.starts_with("tb") && t[2..].chars().all(|c| c.is_ascii_digit()))
+    query.split_whitespace().any(|t| {
+        // tbNNN task ids, and any volume:id-shaped token (arc:123, layer:45)
+        let digits = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
+        (t.starts_with("tb") && digits(&t[2..]))
+            || (t.contains(':')
+                && t.split(':').count() == 2
+                && digits(t.split(':').nth(1).unwrap_or("")))
+    })
 }
 
 /// Best tag-overlap neighbor (excluding the row itself) — the "related" hint.
@@ -106,21 +111,31 @@ fn related_by_tag<'a>(rows: &'a [EntryRow], row: &EntryRow) -> Option<&'a EntryR
 fn staged_files() -> Vec<(String, PathBuf)> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     let staging = Path::new(&home).join(".stellario/staging");
-    let mut out = Vec::new();
-    let Ok(caps) = std::fs::read_dir(&staging) else { return out };
-    for cap in caps.flatten() {
-        let cap_dir = cap.path();
-        let creation = cap_dir.join(".stella");
-        if !creation.is_dir() {
-            continue;
+    // Staging is shape-driven (anywhere): also scan cwd when it has the
+    // undeclared-home shape.
+    let mut roots: Vec<PathBuf> = vec![staging];
+    if let Ok(cwd) = std::env::current_dir() {
+        if cwd.join(".stella").is_dir() && crate::config::discover(&cwd).is_none() {
+            roots.push(cwd);
         }
-        let Ok(files) = std::fs::read_dir(&creation) else { continue };
-        for f in files.flatten() {
-            if f.path().extension().and_then(|e| e.to_str()) == Some("stella") {
-                out.push((
-                    cap.file_name().to_string_lossy().to_string(),
-                    f.path(),
-                ));
+    }
+    let mut out = Vec::new();
+    for root in roots {
+        let Ok(caps) = std::fs::read_dir(&root) else { continue };
+        for cap in caps.flatten() {
+            let cap_dir = cap.path();
+            let creation = cap_dir.join(".stella");
+            if !creation.is_dir() {
+                continue;
+            }
+            let Ok(files) = std::fs::read_dir(&creation) else { continue };
+            for f in files.flatten() {
+                if f.path().extension().and_then(|e| e.to_str()) == Some("stella") {
+                    out.push((
+                        cap.file_name().to_string_lossy().to_string(),
+                        f.path(),
+                    ));
+                }
             }
         }
     }

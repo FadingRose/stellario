@@ -152,6 +152,9 @@ enum Cmd {
         /// Minimum level to show (error|warning|info).
         #[arg(long, default_value = "info")]
         level: String,
+        /// Index file (default ~/.stellario/index.db; env STELLA_INDEX overrides).
+        #[arg(long)]
+        index: Option<PathBuf>,
     },
     /// Governance act: migrate entries to a target capsule (auto-created).
     /// Source entries are tombstoned with intent; provenance stays in lineage.
@@ -165,6 +168,9 @@ enum Cmd {
         /// Source capsule (default: resolve each id across all capsules).
         #[arg(long)]
         from: Option<String>,
+        /// Index file (default ~/.stellario/index.db; env STELLA_INDEX overrides).
+        #[arg(long)]
+        index: Option<PathBuf>,
     },
     /// Delete an entry (supersede to tombstone). Disappears from search, stays in lineage.
     Delete {
@@ -558,8 +564,12 @@ fn main() -> Result<()> {
 
 
             // ── shape-aware sync (no flags): the directory declares its own
-            //    semantics by its file layout (constellation §3.7) ──
-            debug_assert!(!*reindex_memory, "reindex branch must precede shape-aware sync");
+            //    semantics by its file layout (constellation §3.7). Runtime
+            //    gated: the reindex branch above returns first; this guard
+            //    makes the ordering constraint hold even in release builds. ──
+            if *reindex_memory {
+                return Ok(());
+            }
             {
                 let cwd = std::env::current_dir()?;
                 if let Some((dir, cfg)) = stellario::config::discover(&cwd) {
@@ -641,15 +651,16 @@ fn main() -> Result<()> {
             );
         }
 
-        Cmd::Doctor { level } => {
+        Cmd::Doctor { level, index } => {
             let min = match level.as_str() {
                 "error" => stellario::govern::Level::Error,
                 "warning" => stellario::govern::Level::Warning,
                 _ => stellario::govern::Level::Info,
             };
-            let index_path = std::env::var("STELLA_INDEX")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| stellario::index::default_path());
+            let index_path = index
+                .clone()
+                .or_else(|| std::env::var("STELLA_INDEX").ok().map(PathBuf::from))
+                .unwrap_or_else(stellario::index::default_path);
             let index = stellario::index::Index::open(&index_path)?;
             let mut registry = Vec::new();
             for name in discover_capsules() {
@@ -665,10 +676,11 @@ fn main() -> Result<()> {
             }
         }
 
-        Cmd::Migrate { ids, to, from } => {
-            let index_path = std::env::var("STELLA_INDEX")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| stellario::index::default_path());
+        Cmd::Migrate { ids, to, from, index } => {
+            let index_path = index
+                .clone()
+                .or_else(|| std::env::var("STELLA_INDEX").ok().map(PathBuf::from))
+                .unwrap_or_else(stellario::index::default_path);
             let to_path = ensure_capsule(&to)?;
             let to_bytes = std::fs::read(&to_path)?;
             let mut to_storage = AutomergeStorage::load(&to_bytes)?;

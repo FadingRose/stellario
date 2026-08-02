@@ -205,6 +205,9 @@ pub fn harvest(paths: &[PathBuf]) -> Result<(Vec<HarvestedEntry>, PathBuf)> {
 }
 
 /// Mirror `.stella` natives from a creation surface into the capsule
+///
+/// NOTE(perf): each mirror reindexes the whole capsule afterwards (in the
+/// CLI). Incremental reindex over changed slugs only is future work.
 /// (constellation §3.6-3.7): create v1 or supersede vN+1 per slug.
 ///
 /// Lint gate: only lint-passing shapes enter the truth store — invalid
@@ -230,6 +233,20 @@ pub fn mirror_natives_to_capsule<S: Storage + ?Sized>(
         let Some(slug) = block.slug() else { continue };
         if !crate::lint::valid_slug(&slug) {
             eprintln!("  [mirror] skip {}: invalid slug {slug:?}", file.display());
+            continue;
+        }
+        // The .stella extension is the claim of discipline — sync enforces
+        // it: grammar violations never enter the truth store (lint gate).
+        let violations = crate::lint::lint_block(block);
+        let errors: Vec<_> = violations
+            .iter()
+            .filter(|v| v.severity == crate::lint::Severity::Error)
+            .collect();
+        if !errors.is_empty() {
+            eprintln!("  [mirror] skip {}: grammar violations — run `stella lint` first", file.display());
+            for v in errors {
+                eprintln!("    [{}] {}", v.code, v.message);
+            }
             continue;
         }
         let tags = block.string_list("tags");

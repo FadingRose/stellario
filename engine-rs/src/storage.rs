@@ -365,27 +365,32 @@ impl Storage for AutomergeStorage {
             self.write_version_obj(&v)?;
         }
 
-        // Append hash to the volume's id timeline.
-        self.append_hash_to_volume(volume, &id, &hash)?;
+        // Append hash to the volume's id timeline — only for genuinely new
+        // versions. An already-existing version (idempotent write or
+        // content-addressed revive) must not double-append its hash or mint
+        // a self-parent edge; that graph noise would corrupt lineage.
+        if !already {
+            self.append_hash_to_volume(volume, &id, &hash)?;
 
-        // Auto parent edge: link to the previous version of this id, carrying intent.
-        let hashes = self.hashes_for(volume, &id)?;
-        if hashes.len() >= 2 {
-            let prev = hashes[hashes.len() - 2].clone();
-            self.append_edge(&Edge {
-                from: hash.clone(),
-                to: prev,
-                kind: EdgeKind::Parent,
-                reason: intent.to_string(),
-            })?;
-        } else if !intent.is_empty() {
-            // Root version: record intent on a self-parent stub for retrieval.
-            self.append_edge(&Edge {
-                from: hash.clone(),
-                to: hash.clone(),
-                kind: EdgeKind::Parent,
-                reason: intent.to_string(),
-            })?;
+            // Auto parent edge: link to the previous version of this id, carrying intent.
+            let hashes = self.hashes_for(volume, &id)?;
+            if hashes.len() >= 2 {
+                let prev = hashes[hashes.len() - 2].clone();
+                self.append_edge(&Edge {
+                    from: hash.clone(),
+                    to: prev,
+                    kind: EdgeKind::Parent,
+                    reason: intent.to_string(),
+                })?;
+            } else if !intent.is_empty() {
+                // Root version: record intent on a self-parent stub for retrieval.
+                self.append_edge(&Edge {
+                    from: hash.clone(),
+                    to: hash.clone(),
+                    kind: EdgeKind::Parent,
+                    reason: intent.to_string(),
+                })?;
+            }
         }
 
         // Typed edges (horizontal). A supersede marks the target superseded.

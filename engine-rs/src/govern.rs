@@ -108,9 +108,9 @@ pub fn doctor(
         std::collections::HashMap::new();
     let distilled = distilled_legacy_ids(registry);
 
-    // Memory-side id set for dangling-ref resolution.
-    let memory_ids: HashSet<String> = index
-        .entries(Some(crate::index::Kind::Memory))
+    // All index ids (repo + memory) — a ref may target either residence.
+    let known_ids: HashSet<String> = index
+        .entries(None)
         .map(|rows| rows.into_iter().map(|r| r.id).collect())
         .unwrap_or_default();
 
@@ -152,11 +152,7 @@ pub fn doctor(
                         if target.is_empty() {
                             continue;
                         }
-                        let exists = if target.contains(':') {
-                            memory_ids.contains(target)
-                        } else {
-                            memory_ids.contains(target)
-                        };
+                        let exists = known_ids.contains(target);
                         if !exists && !is_supersedes {
                             out.push(Finding::new(
                                 Level::Error,
@@ -257,6 +253,10 @@ pub fn doctor(
 /// Migrate entries to a target capsule (auto-created by the caller).
 /// Source entries are tombstoned with intent; targets record provenance in
 /// their intent. Returns migrated ids.
+///
+/// NOTE: content/tags/keywords are carried; MemRefs and typed edges are NOT
+/// (cross-capsule provenance lives in intent strings — a deliberate v1
+/// simplification, see governance plan m1).
 pub fn migrate(
     from: &mut AutomergeStorage,
     to: &mut AutomergeStorage,
