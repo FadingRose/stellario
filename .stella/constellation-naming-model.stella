@@ -1,0 +1,24 @@
+# The constellation model
+
+stellario's memory is organized by naming, not by registry. A slug's
+family lives in a `.stella/` directory: the canonical `<slug>.stella`
+(lint-disciplined, indexed) and drafts `<slug>.<star>` (loose form,
+gitignored — the extension IS the canonical claim). Demotion is losing
+the extension; a vacant canonical slot is an open question, not an
+error. Capsules emerge from sync targeting them — structure is
+discovered from writing, never declared.
+
+<stellario>
+header: constellation-naming-model — Memory is grouped by filenames, not registries; structure emerges from writing.
+tags: [domain:stellario, layer:architecture]
+keywords: [constellation, naming-is-grouping, emergence, star-drafts, demotion]
+walls:
+  - not: a registry — membership is the naming itself
+  - traps: create ceremonies assume memory's shape; they were removed (no new capsule command)
+  - warning: constellations can become graveyards if the report is not in-path
+refs:
+  - supersedes: constellation-model proposal — distilled from docs/proposals
+chain:
+  - docs/proposals/constellation-model.md
+author: kimi-k3
+</stellario>

@@ -1,0 +1,22 @@
+# Three planes, one authority rule
+
+Storage, index, and edit are separate planes with non-overlapping
+lifecycles; every transition is an explicit tool act. Truth lives in
+exactly two places: inline embeds (the file — bound to the code) and
+capsule entries (the capsule). The index is derived and rebuildable;
+edit files are transient. A directory's semantics come from its own
+layout: `.stellario` + `.stella/` is a self-declared home (sync is
+automatic); only `.stella/` is the staging shape (sync needs a target —
+the scratch inbox by default).
+
+<stellario>
+header: three-planes-authority-rule — Storage (truth), index (derived), edit (transient); truth in two places by residence.
+tags: [domain:stellario, layer:architecture]
+keywords: [three-planes, authority-by-residence, shape-rule, derived-index]
+walls:
+  - not: a database — entries are prose first, the block is the retrieval interface
+  - not: auto-fixing — lint reports, never rewrites prose
+chain:
+  - docs/proposals/constellation-model.md
+author: kimi-k3
+</stellario>
