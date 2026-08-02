@@ -164,12 +164,25 @@ impl Block {
     }
 
     /// A string-list field (tags/keywords/refs/chain/codemap) as Vec<String>.
+    ///
+    /// Typed bullets (`- supersedes: X — reason`) parse as single-key YAML
+    /// MAPPINGS, not strings — flatten them to `"supersedes: X — reason"`
+    /// so string consumers (refs extraction, lint, govern) see the bullet.
     pub fn string_list(&self, key: &str) -> Vec<String> {
         match self.get(key) {
             Some(serde_yaml::Value::Sequence(items)) => items
                 .iter()
                 .filter_map(|i| match i {
                     serde_yaml::Value::String(s) => Some(s.clone()),
+                    serde_yaml::Value::Mapping(m) if m.len() == 1 => {
+                        // single-key mapping → "key: value" bullet
+                        m.iter().next().and_then(|(k, v)| match (k, v) {
+                            (serde_yaml::Value::String(k), serde_yaml::Value::String(v)) => {
+                                Some(format!("{k}: {v}"))
+                            }
+                            _ => None,
+                        })
+                    }
                     _ => None,
                 })
                 .collect(),
