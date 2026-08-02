@@ -126,12 +126,17 @@ pub fn identify<S: Storage + ?Sized>(storage: &S, volume: &str) -> Result<Vec<Cl
         }
     };
 
+    let member_nums: HashSet<String> = entries.iter().map(|(n, _, _)| n.clone()).collect();
     let mut edge_count = 0;
     for (num, _t, content) in &entries {
         let (_, edges) = scan(content);
         for (_, to) in edges {
-            union(&mut parent, num, &to);
-            edge_count += 1;
+            // Only union when BOTH endpoints are volume members — refs to
+            // out-of-volume ids (l197 etc.) must not stitch threads together.
+            if member_nums.contains(num) && member_nums.contains(&to) {
+                union(&mut parent, num, &to);
+                edge_count += 1;
+            }
         }
     }
     let _ = &mut edge_count;
