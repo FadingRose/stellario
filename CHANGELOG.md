@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-29
+
+First release of the self-contained Rust engine (`stella`) as the sole
+product surface, replacing the TypeScript/Go era. The version continues
+past the legacy `v0.9.0` tag; the abandoned `v1.0.0-beta.*` prereleases
+belong to the old npm line and do not constrain this one.
+
 ### Added
 - **Unified tool surface** — one binary, five verb classes (query / write
   loop / lint / governance / storage). `stellario` is an alias for `stella`.
@@ -21,13 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Go host support** — `.go` files harvest `<stellario>` blocks through
   `//` line comments (including `//go:` directives and doc comments);
   block comments are treated as code, like fenced code in markdown.
+- **Design-thread clustering** — `stella cluster <volume>` surfaces
+  candidate clusters (supersede chains + shared keywords) for the
+  layer-scale distill; `cluster: [ids…]` refs mark merged threads.
 
 ### Changed
 - Removed the TS layer entirely; the Rust CLI is the only surface.
 - Removed retired edit-loop verbs (write / expand / expand-new / delete).
-- v0.1.0 -> v0.2.0 (pre-1.0; MINOR may break — API not frozen).
-- Skill `0.3.0` — the narrative surface (exploration framing); `.go` added
-  to the embed-host list.
+- Pre-1.0: MINOR may break — the API is not frozen.
+- Agent skill `0.3.0` — the narrative surface (exploration framing);
+  `.go` added to the embed-host list.
 
 ### Fixed
 - `govern` resolves `cluster: [ids…]` refs per member — a dangling member
@@ -312,7 +322,8 @@ This is a pre-release; `npm install stellario` still gets 0.9.1. Use `npm instal
 - Telescope tool: unified search with text matching, tag filtering (`AND`/`OR`/`NOT`), and keyword enumeration modes.
 - Documentation: README, API reference, configuration guide, concepts guide.
 
-[Unreleased]: https://github.com/FadingRose/stellario/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/FadingRose/stellario/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/FadingRose/stellario/compare/v1.0.0-beta.7...v0.10.0
 [0.9.0]: https://github.com/FadingRose/stellario/compare/v0.8.4...v0.9.0
 [0.8.4]: https://github.com/FadingRose/stellario/compare/v0.8.3...v0.8.4
 [0.8.4]: https://github.com/FadingRose/stellario/compare/v0.8.3...v0.8.4

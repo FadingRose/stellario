@@ -1,12 +1,12 @@
 # stellario release — package the unified tool + skill for distribution.
 #
-#   make release VERSION=0.2.0            # linux-amd64 (local platform)
-#   make release VERSION=0.2.0 TARGET=aarch64-apple-darwin   # on mac/CI
+#   make release VERSION=0.10.0           # linux-amd64 (local platform)
+#   make release VERSION=0.10.0 TARGET=aarch64-apple-darwin  # on mac/CI
 #
 # Output: dist/stella-<version>-<platform>.tar.gz + .sha256
 # Platform naming: <os>-<arch> (linux-amd64, darwin-arm64, ...).
 
-VERSION ?= 0.2.0
+VERSION ?= 0.10.0
 TARGET  ?= $(shell rustc -vV | sed -n 's/host: //p')
 
 # Map rust target triple → release platform name.

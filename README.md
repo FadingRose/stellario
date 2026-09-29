@@ -128,7 +128,7 @@ cd stellario && stella "constellation" "our own design"
 
 ```bash
 cd engine-rs && cargo test -p stellario-engine && cargo build --release
-make release VERSION=0.2.0   # dist/ tarball + checksum (linux; darwin on mac/CI)
+make release VERSION=0.10.0  # dist/ tarball + checksum (linux; darwin on mac/CI)
 ```
 
 Architecture: three planes — storage (automerge capsule, truth), index

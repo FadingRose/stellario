@@ -3,7 +3,7 @@
 # and links the agent skill. Works from GitHub Releases or a local dist/.
 #
 #   curl -fsSL https://raw.githubusercontent.com/FadingRose/stellario/main/install.sh | sh
-#   VERSION=0.2.0 sh install.sh          # pin a version
+#   VERSION=0.10.0 sh install.sh         # pin a version
 #   LOCAL=dist sh install.sh             # install from a local build (make release)
 
 set -e
