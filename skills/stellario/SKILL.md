@@ -1,6 +1,6 @@
 ---
 name: stellario
-description: Write and manage <stellario> memory entries — the hybrid-search comment format plus its write loop. Narrative: stella explores the world's memory (search/show/lineage), inline blocks mark, .stella/ is the library. Use when writing knowledge into code comments or docs, searching memory, syncing .stella files to a capsule, linting entry blocks, or governing memory health.
+description: "Write and manage <stellario> memory entries — the hybrid-search comment format plus its write loop. Narrative: stella explores the world's memory (search/show/lineage), inline blocks mark, .stella/ is the library. Use when writing knowledge into code comments or docs, searching memory, syncing .stella files to a capsule, linting entry blocks, or governing memory health."
 whenToUse: When the user asks to write a .stella entry or a <stellario> comment block, query memory with intent, sync staged entries, lint entry blocks, run memory health checks, or migrate entries between capsules.
 metadata:
   version: "0.3.0"
