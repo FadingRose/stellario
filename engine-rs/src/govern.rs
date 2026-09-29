@@ -161,6 +161,27 @@ pub fn doctor(
                         if target.is_empty() {
                             continue;
                         }
+                        // cluster: [ids...] — every listed member is a ref
+                        // target, not the whole list; resolve each member
+                        // (mirrors distilled_legacy_ids parsing).
+                        if let Some(list) = target.strip_prefix("cluster:") {
+                            for item in list.split([',', ' ', '[', ']']) {
+                                let item = item.trim();
+                                if item.is_empty() || !item.contains(':') {
+                                    continue;
+                                }
+                                if !known_ids.contains(item) {
+                                    out.push(Finding::new(
+                                        Level::Error,
+                                        "dangling-ref",
+                                        cap,
+                                        Some(entry_id.clone()),
+                                        format!("cluster member {item:?} does not resolve"),
+                                    ));
+                                }
+                            }
+                            continue;
+                        }
                         let exists = known_ids.contains(target);
                         if !exists && !is_supersedes {
                             out.push(Finding::new(
@@ -430,6 +451,52 @@ mod distill_debug {
         let findings = doctor(&registry, &idx, &staging, Level::Info);
         eprintln!("findings: {:?}", findings.iter().map(|f| (&f.code, &f.entry)).collect::<Vec<_>>());
         assert!(!findings.iter().any(|f| f.code == "un-distilled"), "meta:52 must not be reported un-distilled");
+        let _ = std::fs::remove_file(&idx_path);
+    }
+
+    #[test]
+    fn cluster_refs_resolve_per_member() {
+        let mut s = AutomergeStorage::new();
+        // native with cluster refs to legacy layer entries
+        s.write("native", Some("some-native-entry"),
+            &"# T\n\n<stellario>\nheader: some-native-entry — tldr.\nrefs:\n  - cluster: [layer:22, layer:132]\n</stellario>\n".to_string(),
+            &["type:reference".into()], &[], "t", "seed", &[], &[]).unwrap();
+        // the legacy members (distinct content — storage is content-addressed)
+        s.write("layer", Some("22"), "## content 22", &[], &[], "t", "seed", &[], &[]).unwrap();
+        s.write("layer", Some("132"), "## content 132", &[], &[], "t", "seed", &[], &[]).unwrap();
+
+        let registry = vec![("test".to_string(), s)];
+        let idx_path = std::env::temp_dir().join(format!("govern-cluster-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&idx_path);
+        let idx = Index::open(&idx_path).unwrap();
+        // legacy members must be in the index for ref resolution
+        crate::index::ingest_memory(&idx, "test", &registry[0].1, &|_| None).unwrap();
+        let staging = std::env::temp_dir().join("no-staging");
+        let findings = doctor(&registry, &idx, &staging, Level::Info);
+        eprintln!("findings: {:?}", findings.iter().map(|f| (&f.code, &f.entry, &f.message)).collect::<Vec<_>>());
+        assert!(!findings.iter().any(|f| f.code == "dangling-ref"), "cluster members resolve, no dangling-ref expected");
+        let _ = std::fs::remove_file(&idx_path);
+    }
+
+    #[test]
+    fn cluster_refs_flag_missing_member() {
+        let mut s = AutomergeStorage::new();
+        // cluster refs, but layer:999 does not exist
+        s.write("native", Some("some-native-entry"),
+            &"# T\n\n<stellario>\nheader: some-native-entry — tldr.\nrefs:\n  - cluster: [layer:22, layer:999]\n</stellario>\n".to_string(),
+            &["type:reference".into()], &[], "t", "seed", &[], &[]).unwrap();
+        s.write("layer", Some("22"), "## content 22", &[], &[], "t", "seed", &[], &[]).unwrap();
+
+        let registry = vec![("test".to_string(), s)];
+        let idx_path = std::env::temp_dir().join(format!("govern-cluster-missing-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&idx_path);
+        let idx = Index::open(&idx_path).unwrap();
+        crate::index::ingest_memory(&idx, "test", &registry[0].1, &|_| None).unwrap();
+        let staging = std::env::temp_dir().join("no-staging");
+        let findings = doctor(&registry, &idx, &staging, Level::Info);
+        eprintln!("findings: {:?}", findings.iter().map(|f| (&f.code, &f.entry, &f.message)).collect::<Vec<_>>());
+        assert!(findings.iter().any(|f| f.code == "dangling-ref" && f.message.contains("layer:999")),
+            "missing cluster member must be flagged");
         let _ = std::fs::remove_file(&idx_path);
     }
 }
