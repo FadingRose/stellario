@@ -14,7 +14,7 @@ directly; edits happen on files.
 
 ## Truth by residence
 
-- **inline embeds** (in `.rs`/`.md`): truth stays with the file — the
+- **inline embeds** (in `.rs`/`.go`/`.md`): truth stays with the file — the
   knowledge is bound to the code.
 - **capsule entries** (natives after sync): truth is the capsule. The
   repo `.stella` file is an edit/review surface, never authoritative.

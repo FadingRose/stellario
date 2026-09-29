@@ -1,6 +1,6 @@
 //! parse — the two-phase `<stellario>` block parser, shared by lint & harvest.
 //!
-//! Phase 1: host comment stripping (Rust `//` variants; markdown raw with
+//! Phase 1: host comment stripping (Rust/Go `//` variants; markdown raw with
 //! fenced-code exclusion). Phase 2: `<stellario>…</stellario>` zone
 //! extraction, YAML subset inside (parsed by serde_yaml).
 //!
@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 /// The attachment scale of an entry (constellation model §3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Form {
-    /// `<stellario>` block inside a host file (.rs/.md).
+    /// `<stellario>` block inside a host file (.rs/.go/.md).
     Embed,
     /// A whole `<slug>.stella` file is one entry.
     Native,
@@ -47,7 +47,10 @@ pub enum Host {
 
 pub fn host_for(path: &Path) -> Option<Host> {
     match path.extension().and_then(|e| e.to_str()) {
-        Some("rs") => Some(Host::Rust),
+        // Rust and Go share the `//` comment style (incl. doc comments,
+        // `//go:` directives); block comments are treated as code, like
+        // fenced code in markdown.
+        Some("rs") | Some("go") => Some(Host::Rust),
         // `.stella` files are markdown-shaped: prose + one block.
         Some("md") | Some("stella") => Some(Host::Markdown),
         _ => None,
@@ -303,5 +306,50 @@ fn visit_dir(dir: &Path, out: &mut Vec<PathBuf>) {
         } else if host_for(&path).is_some() {
             out.push(path);
         }
+    }
+}
+
+// ─── Tests ─────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_for_covers_go() {
+        assert_eq!(host_for(Path::new("main.go")), Some(Host::Rust));
+        assert_eq!(host_for(Path::new("lib.rs")), Some(Host::Rust));
+        assert_eq!(host_for(Path::new("doc.md")), Some(Host::Markdown));
+        assert_eq!(host_for(Path::new("entry.stella")), Some(Host::Markdown));
+        assert_eq!(host_for(Path::new("main.py")), None);
+        assert_eq!(host_for(Path::new("Cargo.toml")), None);
+    }
+
+    #[test]
+    fn go_comment_blocks_extract() {
+        let src = "package main\n\n// foo-bar-baz — tldr.\n//\n// <stellario>\n// header: foo-bar-baz — tldr.\n// binding: embed\n// </stellario>\nfunc main() {}\n";
+        let outcome = extract_blocks(Path::new("main.go"), Host::Rust, src);
+        assert!(outcome.errors.is_empty(), "parse errors: {:?}", outcome.errors);
+        assert_eq!(outcome.blocks.len(), 1);
+        assert_eq!(outcome.blocks[0].slug().as_deref(), Some("foo-bar-baz"));
+        assert_eq!(outcome.blocks[0].start_line, 5);
+    }
+
+    #[test]
+    fn go_block_comments_are_not_content() {
+        // `/* ... */` interior without `//` prefixes must be treated as
+        // code, mirroring fenced code in markdown — a bare marker inside it
+        // is not a block.
+        let src = "package main\n\n/*\n<stellario>\nheader: fake-fake-fake — example.\n</stellario>\n*/\nfunc main() {}\n";
+        let outcome = extract_blocks(Path::new("main.go"), Host::Rust, src);
+        assert_eq!(outcome.blocks.len(), 0, "block-comment interior must not be harvested");
+    }
+
+    #[test]
+    fn go_directives_do_not_disturb() {
+        let src = "//go:build linux\n\n//go:generate stringer -type=Kind\n\n// <stellario>\n// header: foo-bar-baz — tldr.\n// binding: embed\n// </stellario>\npackage main\n";
+        let outcome = extract_blocks(Path::new("main.go"), Host::Rust, src);
+        assert_eq!(outcome.blocks.len(), 1);
+        assert_eq!(outcome.blocks[0].slug().as_deref(), Some("foo-bar-baz"));
     }
 }
