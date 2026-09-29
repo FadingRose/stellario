@@ -18,11 +18,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Governance** — `doctor` (graded health: error/warning/info) and
   `migrate` (relocation with provenance).
 - **Capsule export** — legacy-exit primitive (`export --capsule --out`).
+- **Go host support** — `.go` files harvest `<stellario>` blocks through
+  `//` line comments (including `//go:` directives and doc comments);
+  block comments are treated as code, like fenced code in markdown.
 
 ### Changed
 - Removed the TS layer entirely; the Rust CLI is the only surface.
 - Removed retired edit-loop verbs (write / expand / expand-new / delete).
 - v0.1.0 -> v0.2.0 (pre-1.0; MINOR may break — API not frozen).
+- Skill `0.3.0` — the narrative surface (exploration framing); `.go` added
+  to the embed-host list.
+
+### Fixed
+- `govern` resolves `cluster: [ids…]` refs per member — a dangling member
+  is now flagged instead of escaping behind the list.
 
 ## [1.0.0-beta.1] - 2026-06-18
 

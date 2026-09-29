@@ -100,7 +100,7 @@ enum Cmd {
     /// for repo embeds, capsule + lineage for natives and legacy.
     Show { id: String },
 
-    /// Lint <stellario> entry blocks in .rs/.md/.stella files.
+    /// Lint <stellario> entry blocks in .rs/.go/.md/.stella files.
     ///
     /// No --fix: violations come with repair suggestions; lint never
     /// rewrites human content. The lint-owned `auto` field is the only

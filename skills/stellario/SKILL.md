@@ -4,7 +4,7 @@ description: Write and manage <stellario> memory entries — the hybrid-search c
 whenToUse: When the user asks to write a .stella entry or a <stellario> comment block, query memory with intent, sync staged entries, lint entry blocks, run memory health checks, or migrate entries between capsules.
 metadata:
   version: "0.3.0"
-  verified-against: "stella/stellario unified CLI (fa43446, 2026-08-02)"
+  verified-against: "stella/stellario unified CLI (8c7672b, 2026-09-29)"
   author: kobayakawaami × kimi-k3
   license: Proprietary
 ---

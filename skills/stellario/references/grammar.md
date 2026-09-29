@@ -1,8 +1,8 @@
 # Grammar — full field spec
 
 A `<stellario>` block is a YAML subset between `<stellario>` and
-`</stellario>`, inside host comments (`//!`, `///`, `//`, `#`, or raw in
-markdown; `.stella` files are markdown-shaped). Two-phase parse: host
+`</stellario>`, inside host comments (`//!`, `///`, `//` — Rust and Go)
+or raw in markdown (`.stella` files are markdown-shaped). Two-phase parse: host
 comment stripping, then zone extraction — the zone grammar is
 host-independent.
 
