@@ -1,9 +1,9 @@
 ---
 name: stellario
-description: Write and manage <stellario> memory entries — the hybrid-search comment format plus its write loop. Use when writing knowledge into code comments or docs, searching memory, syncing .stella files to a capsule, linting entry blocks, or governing memory health.
+description: Write and manage <stellario> memory entries — the hybrid-search comment format plus its write loop. Narrative: stella explores the world's memory (search/show/lineage), inline blocks mark, .stella/ is the library. Use when writing knowledge into code comments or docs, searching memory, syncing .stella files to a capsule, linting entry blocks, or governing memory health.
 whenToUse: When the user asks to write a .stella entry or a <stellario> comment block, query memory with intent, sync staged entries, lint entry blocks, run memory health checks, or migrate entries between capsules.
 metadata:
-  version: "0.2.0"
+  version: "0.3.0"
   verified-against: "stella/stellario unified CLI (fa43446, 2026-08-02)"
   author: kobayakawaami × kimi-k3
   license: Proprietary
@@ -14,6 +14,27 @@ metadata:
 stellario turns prose sections (code comments, docs, standalone files) into
 memory entries for a hybrid retrieval index. One tool, five verb classes.
 The loop: **query → write → sync → show → govern**.
+
+## The narrative — a tool for exploring the world
+
+stellario is not a database interface. It is how you explore this world.
+
+- **stella explores** — search / show / lineage walk the world's memory:
+  find knowledge, understand a decision.
+- **inline marks** — a `<stellario>` block is a marker, not content: it
+  annotates prose, never copies it. The block is the retrieval interface,
+  never the content itself.
+- **`.stella/` is the library** — the things worth consulting live here
+  (native entries). `stella sync` files them into the archive — the
+  capsule (constellation).
+- **star drafts** (`<slug>.<star>`) — sketches from exploring: a star
+  drawn while walking under the sky, promoted to a full entry when it
+  is thought through.
+
+Query assumes you know what you are looking for; exploration lets you
+find what you did not know you knew. This world's knowledge is alive —
+lineage, capsules, walls, falsifications. Administration treats
+knowledge as property; exploration treats it as a world.
 
 ## The tool
 
@@ -33,7 +54,7 @@ stella list | volumes | lineage  registry + history
 
 ## The entry format (minimum you must know)
 
-A memory entry is a `<stellario>` block inside comments (`.rs`/`.md`) or at
+A memory entry is a `<stellario>` block inside comments (`.rs`/`.go`/`.md`) or at
 the end of a standalone `.stella` file:
 
 ```rust
