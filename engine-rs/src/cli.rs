@@ -10,7 +10,7 @@
 //!   stella show <id>          — read one entry (read)
 //!   stella lint <paths>       — edit-plane discipline (write: auto field)
 //!   stella sync [--capsule]   — the write loop, shape-aware (write)
-//!   stella doctor / migrate   — governance (check / act)
+//!   stella doctor / migrate / archive — governance (check / act)
 //!   stella export / list / …  — storage surface (legacy + governance)
 //!
 //! Failure-domain discipline lives at the COMMAND level, not the binary
@@ -43,6 +43,7 @@ ONE TOOL, FIVE VERB CLASSES
   Governance:
     stella doctor [--level error|warning|info]   — full-system health (read-only)
     stella migrate <ids> --to <capsule>          — relocate entries (auto-create)
+    stella archive <ids>                         — seal legacy out of default search
 
   Storage:
     stella export --capsule NAME --out DIR       — capsule → files (legacy-exit)
@@ -147,6 +148,16 @@ enum Cmd {
         /// Source capsule (default: resolve each id across all capsules).
         #[arg(long)]
         from: Option<String>,
+    },
+
+    /// Governance act: archive entries out of the default retrieval surface.
+    /// Each source is copied to the `archived` volume and sealed in place
+    /// with a `> Superseded by …` marker — retained, but excluded from
+    /// default search (`--sealed` shows it).
+    Archive {
+        /// Entry ids (volume:id or slug), e.g. meta:52.
+        #[arg(required = true)]
+        ids: Vec<String>,
     },
 
     /// Export the capsule to files (legacy-exit primitive): read-only dump
@@ -437,6 +448,9 @@ fn run_query(cli: &Cli, query: &str, intent: &str, kind: Option<crate::index::Ki
         if !include_stars && row.form == crate::parse::Form::Star {
             continue;
         }
+        if !include_sealed && row.form == crate::parse::Form::Sealed {
+            continue;
+        }
         by_id.entry(row.id.clone()).or_default().push(row);
     }
     let mut rows: Vec<crate::index::EntryRow> = Vec::new();
@@ -481,7 +495,11 @@ fn run_query(cli: &Cli, query: &str, intent: &str, kind: Option<crate::index::Ki
                         };
                         for k in want {
                             if let Some(row) = idx.entries(Some(k))?.into_iter().find(|r| r.id == id) {
-                                scored.insert(id.clone(), (row, fused));
+                                let excluded = (!include_sealed && row.form == crate::parse::Form::Sealed)
+                                    || (!include_stars && row.form == crate::parse::Form::Star);
+                                if !excluded {
+                                    scored.insert(id.clone(), (row, fused));
+                                }
                                 break;
                             }
                         }
@@ -842,6 +860,29 @@ pub fn run() -> Result<()> {
                 }
             }
             println!("migrated: {}", done.join(", "));
+            Ok(())
+        }
+        Some(Cmd::Archive { ids }) => {
+            let capsule_name = resolve_capsule_name(&cli);
+            let (name, mut storage) = load_capsule(Some(&capsule_name))?;
+            let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
+            let done = crate::govern::archive(&mut storage, &id_refs, "archived", "stellario")?;
+            let path = project_capsule_path(&name)
+                .ok_or_else(|| anyhow!("capsule '{}' not found", name))?;
+            std::fs::write(&path, storage.save()?)?;
+
+            let index_path = index_path(&cli);
+            let index = crate::index::Index::open(&index_path)?;
+            let n = crate::index::ingest_memory(&index, &name, &storage, &|texts| {
+                crate::telescope::embed_texts(texts)
+            })?;
+            println!("memory reindex: {} entries from capsule '{}'", n, name);
+            if done.is_empty() {
+                println!("archived: none");
+            } else {
+                let pairs: Vec<String> = done.iter().map(|(src, dst)| format!("{src} -> {dst}")).collect();
+                println!("archived: {}", pairs.join(", "));
+            }
             Ok(())
         }
         None => match (&cli.query, &cli.intent) {

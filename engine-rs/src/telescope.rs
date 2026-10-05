@@ -14,11 +14,14 @@
 //!
 //! Searches **active (non-superseded) materialized entries** across volumes.
 //! The embedding engine is lazy-loaded (fastembed, AllMiniLML6V2, 384-dim — same
-//! ONNX weights as the TS pipeline, numerically equivalent). If embeddings are
-//! unavailable (no model downloaded / offline first run), degrades gracefully
-//! to fzf-only.
+//! ONNX weights as the TS pipeline, numerically equivalent). The ONNX weights
+//! are cached under `~/.stellario/models` (`model_cache_dir`) so the CLI
+//! finds them without any environment setup. If embeddings are unavailable (no
+//! model downloaded / offline first run), degrades gracefully to fzf-only.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use anyhow::Result;
 
@@ -250,7 +253,25 @@ struct EmbeddingEngine {
     model: fastembed::TextEmbedding,
 }
 
-use std::sync::OnceLock;
+/// Where the ONNX weights live. A stable per-user path so the binary works
+/// with no environment setup; the fastembed/`HF_*` overrides still win when
+/// the caller sets them.
+fn model_cache_dir() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    PathBuf::from(home).join(".stellario").join("models")
+}
+
+/// InitOptions pointed at the stellario model cache. fastembed reads
+/// `FASTEMBED_CACHE_DIR` itself, and hf-hub overrides the cache dir from
+/// `HF_HOME` inside the download — so defer to both when they are set.
+fn init_options() -> fastembed::InitOptions {
+    let opts = fastembed::InitOptions::new(fastembed::EmbeddingModel::AllMiniLML6V2);
+    if std::env::var_os("FASTEMBED_CACHE_DIR").is_some() {
+        opts
+    } else {
+        opts.with_cache_dir(model_cache_dir())
+    }
+}
 
 static EMBEDDING: OnceLock<Option<EmbeddingEngine>> = OnceLock::new();
 
@@ -258,12 +279,9 @@ impl EmbeddingEngine {
     /// Get the global embedding engine, or None if unavailable.
     fn get() -> Option<&'static EmbeddingEngine> {
         EMBEDDING
-            .get_or_init(|| {
-                use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
-                match TextEmbedding::try_new(InitOptions::new(EmbeddingModel::AllMiniLML6V2)) {
-                    Ok(model) => Some(EmbeddingEngine { model }),
-                    Err(_) => None,
-                }
+            .get_or_init(|| match fastembed::TextEmbedding::try_new(init_options()) {
+                Ok(model) => Some(EmbeddingEngine { model }),
+                Err(_) => None,
             })
             .as_ref()
     }
@@ -301,6 +319,21 @@ fn all_volume_names<S: Storage + ?Sized>(storage: &S) -> Result<Vec<String>> {
 mod tests {
     use super::*;
     use crate::storage::AutomergeStorage;
+
+    #[test]
+    fn model_cache_dir_is_stellario_home() {
+        let dir = model_cache_dir();
+        assert!(dir.ends_with(".stellario/models"), "got {}", dir.display());
+    }
+
+    #[test]
+    fn init_options_default_to_the_stellario_cache() {
+        // The env readings are process-wide, so only assert the shape that
+        // holds when neither override is set (the common case).
+        if std::env::var_os("FASTEMBED_CACHE_DIR").is_none() {
+            assert_eq!(init_options().cache_dir, model_cache_dir());
+        }
+    }
 
     fn seed() -> AutomergeStorage {
         let mut s = AutomergeStorage::new();

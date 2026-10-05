@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`stella archive <ids>`** — retire legacy entries from the default
+  retrieval surface without deleting them. Each source is copied to the
+  `archived` volume and sealed in place with a `> Superseded by …` marker, so
+  it drops out of default search (still reachable with `--sealed`) while its
+  lineage stays intact and `doctor` sees no orphan tombstone.
+
+### Fixed
+- **Sealed entries leaked into default search.** `Form::Sealed` rows were
+  ingested and labelled, but `run_query` never applied the `--sealed` switch
+  (the parameter was unused), so archived/superseded/migrated entries showed
+  up in default search. They are now excluded unless `--sealed` is passed.
+
+- **Model cache location.** The embedding weights now default to
+  `~/.stellario/models` instead of fastembed's cwd-relative
+  `.fastembed_cache`, so semantic search works without exporting anything.
+  `FASTEMBED_CACHE_DIR` and `HF_HOME` still override the default.
+- **`migrate` orphan tombstones.** The source tombstone marker was a constant
+  string while version hashes are content-addressed, so migrating more than one
+  entry to the same target collapsed every tombstone onto one hash — only the
+  first id's timeline received it and the rest were left superseded with no
+  successor (`doctor` `orphan-tombstone`). The marker now embeds the source
+  address.
+
 ## [0.10.0] - 2026-09-29
 
 First release of the self-contained Rust engine (`stella`) as the sole

@@ -1,4 +1,4 @@
-//! govern — the governance plane: doctor (check) + migrate (act).
+//! govern — the governance plane: doctor (check) + migrate / archive (act).
 //!
 //! One topic, lint-loop shaped: check → suggest → explicit act → recheck.
 //! Checks are read-only; acts are explicit. This is the whole maintenance
@@ -321,7 +321,13 @@ pub fn migrate(
             &[],
             &[],
         )?;
-        // Source: tombstone with intent (stays in lineage).
+        // Source: tombstone with intent (stays in lineage). The marker embeds
+        // the source address so every tombstone is unique: version hashes are
+        // content-addressed over (content + tags + keywords), so a constant
+        // marker collides across all entries migrating to the same target and
+        // only the first id's timeline receives it — the rest are left
+        // superseded with no successor (orphan-tombstone).
+        let marker = format!("(migrated to {to_name}: {vol}:{n})");
         let edge = Edge {
             from: String::new(),
             to: entry.hash.clone(),
@@ -331,7 +337,7 @@ pub fn migrate(
         from.write(
             &vol,
             Some(&n),
-            &format!("(migrated to {to_name})"),
+            &marker,
             &["type:migrated".to_string()],
             &[],
             author,
@@ -340,6 +346,69 @@ pub fn migrate(
             &[edge],
         )?;
         done.push(id.to_string());
+    }
+    Ok(done)
+}
+
+/// Archive entries: retire legacy history out of the default retrieval
+/// surface without deleting it. Each source entry is copied to
+/// `archive_volume` (which `index::is_sealed` excludes by volume name) and the
+/// source is sealed in place with a `> Superseded by <target>` marker (which
+/// `is_sealed` excludes by content prefix). Nothing is deleted: the source id
+/// keeps a non-superseded tip, so `doctor`'s orphan-tombstone check stays
+/// clean and `lineage` still tells the whole story.
+///
+/// Returns `(source id, archive address)` pairs for the entries archived.
+pub fn archive(
+    storage: &mut AutomergeStorage,
+    ids: &[&str],
+    archive_volume: &str,
+    author: &str,
+) -> Result<Vec<(String, String)>> {
+    let mut done = Vec::new();
+    for id in ids {
+        // Slugs live in the native volume; volume:id legacy keeps its volume.
+        let (vol, n) = match id.split_once(':') {
+            Some((v, n)) => (v.to_string(), n.to_string()),
+            None => (crate::harvest::NATIVE_VOLUME.to_string(), id.to_string()),
+        };
+        let Some(entry) = storage.materialize(&vol, &n)? else {
+            eprintln!("  [archive] skip {id}: not found");
+            continue;
+        };
+        if crate::index::is_sealed(&entry.volume, &entry.content) {
+            eprintln!("  [archive] skip {id}: already sealed");
+            continue;
+        }
+        // Archive copy: carrier tag makes the content hash unique, so two
+        // sources with identical content can never collide onto one version.
+        let mut tags = entry.tags.clone();
+        tags.push(format!("archived-from:{vol}:{n}"));
+        let (arch_id, _) = storage.write(
+            archive_volume,
+            None,
+            &entry.content,
+            &tags,
+            &entry.keywords,
+            author,
+            &format!("archived from {vol}:{n}"),
+            &[],
+            &[],
+        )?;
+        // Seal the source in place. No Supersede edge: a non-superseded tip
+        // keeps the id materializable, so doctor sees no orphan tombstone.
+        storage.write(
+            &vol,
+            Some(&n),
+            &format!("> Superseded by {archive_volume}:{arch_id}"),
+            &entry.tags,
+            &entry.keywords,
+            author,
+            &format!("archived to {archive_volume}:{arch_id}"),
+            &[],
+            &[],
+        )?;
+        done.push((id.to_string(), format!("{archive_volume}:{arch_id}")));
     }
     Ok(done)
 }
@@ -416,6 +485,80 @@ mod tests {
         // source tombstoned with marker
         let s = from.materialize("whiteboard", "99").unwrap().unwrap();
         assert!(s.content.starts_with("(migrated to"), "source must be tombstoned: {}", s.content);
+    }
+
+    /// Regression: every migrated id must get its own tombstone version. The
+    /// markers were a constant string, so their content-addressed hashes
+    /// collided and only the first id's timeline received one; the others were
+    /// left superseded with no successor (doctor `orphan-tombstone`).
+    #[test]
+    fn migrate_tombstones_every_id_in_a_batch() {
+        let mut from = AutomergeStorage::new();
+        for n in ["1", "2", "3"] {
+            from.write("meta", Some(n), &format!("## entry {n}"),
+                &["type:methodology".into()], &[], "a", "seed", &[], &[]).unwrap();
+        }
+        let mut to = AutomergeStorage::new();
+        let done = migrate(&mut from, &mut to, &["meta:1", "meta:2", "meta:3"], "prism", "archive", "t").unwrap();
+        assert_eq!(done.len(), 3);
+        for n in ["1", "2", "3"] {
+            // Source: materializable (non-orphan) tombstone.
+            let s = from.materialize("meta", n).unwrap()
+                .unwrap_or_else(|| panic!("meta:{n} must not be an orphan tombstone"));
+            assert!(s.content.starts_with("(migrated to"), "meta:{n} tombstoned: {}", s.content);
+            // Target: the real content moved across.
+            let t = to.materialize("meta", n).unwrap().unwrap();
+            assert_eq!(t.content, format!("## entry {n}"));
+        }
+    }
+
+    #[test]
+    fn archive_seals_source_and_copies_content() {
+        let mut s = AutomergeStorage::new();
+        s.write(
+            "active",
+            Some("1"),
+            "## legacy claim",
+            &["type:design".into()],
+            &["alpha".into()],
+            "a",
+            "seed",
+            &[],
+            &[],
+        )
+        .unwrap();
+        let done = archive(&mut s, &["active:1"], "archived", "t").unwrap();
+        assert_eq!(done.len(), 1);
+        assert_eq!(done[0].0, "active:1");
+        assert!(done[0].1.starts_with("archived:"), "archive address: {}", done[0].1);
+
+        // (a) The source id is NOT an orphan — it keeps a materializable,
+        // sealed tip pointing at the copy.
+        let src = s
+            .materialize("active", "1")
+            .unwrap()
+            .expect("source must not be an orphan tombstone");
+        assert!(
+            src.content.starts_with("> Superseded by archived:"),
+            "source sealed in place: {}",
+            src.content
+        );
+
+        // (b) The archived copy carries the original content verbatim.
+        let (avol, aid) = done[0].1.split_once(':').unwrap();
+        let arch = s.materialize(avol, aid).unwrap().unwrap();
+        assert_eq!(arch.content, "## legacy claim");
+
+        // (c) The source marker makes is_sealed true — it leaves default search.
+        assert!(crate::index::is_sealed("active", &src.content));
+    }
+
+    #[test]
+    fn archive_skips_sealed_and_missing() {
+        let mut s = AutomergeStorage::new();
+        s.write("active", Some("1"), "> DISABLED", &[], &[], "a", "seed", &[], &[]).unwrap();
+        let done = archive(&mut s, &["active:1", "active:99"], "archived", "t").unwrap();
+        assert!(done.is_empty(), "sealed + missing must both be skipped: {done:?}");
     }
 }
 

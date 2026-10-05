@@ -143,8 +143,10 @@ verify the published `.sha256` file.
   blocks) and `memory` (capsule entries).
 - Embedded vectors are for **keywords only** — content is never embedded
   (that would be RAG). Model: `AllMiniLML6V2`, 384-dim via `fastembed`, the
-  same ONNX weights as the old TS pipeline. Embedding is lazy-loaded; if the
-  model is unavailable, search degrades gracefully to fzf-only.
+  same ONNX weights as the old TS pipeline. Embedding is lazy-loaded, and the
+  weights are cached at `~/.stellario/models` (override with
+  `FASTEMBED_CACHE_DIR` or `HF_HOME`); if the model is unavailable, search
+  degrades gracefully to fzf-only.
 - Authority discipline: the index can be deleted and rebuilt from capsule +
   repo at any time. Corruption is a non-event.
 
@@ -186,6 +188,8 @@ stella sync [--repo P] [--reindex-memory] [--status]
 stella doctor [--level L]      graded health (error|warning|info). Read-only.
                                Exits 1 if any error-level finding.
 stella migrate <ids> --to <cap> [--from <cap>]
+stella archive <ids>           seal legacy out of default search (copy →
+                               archived volume + in-place `> Superseded by …`)
 stella export --out <dir>      capsule → <out>/<volume>/<id>.md + manifest.jsonl
 stella cluster <volume>        design-thread candidates for distillation
 stella list | volumes | lineage <id>
@@ -237,7 +241,7 @@ relevant proposal filename. They are the primary onboarding material.
 | `harvest.rs` | Repo → index (walk `.rs`/`.go`/`.md`), and `.stella` natives → capsule (`mirror_natives_to_capsule`). |
 | `telescope.rs` | Hybrid search core: fzf weighted substrings (id ×10, tag/slug ×6, keyword ×5, content ×3) fused with semantic cosine (×0.5). |
 | `hints.rs` | The read-only guide layer on top of query/show. Relevance-gated, max 3. |
-| `govern.rs` | Governance plane: `doctor` (graded check) + `migrate` (relocation with provenance). |
+| `govern.rs` | Governance plane: `doctor` (graded check) + `migrate` (relocation with provenance) + `archive` (seal out of default retrieval). |
 | `migrate.rs` | JSONL → Automerge migration. |
 | `constellation.rs` | `.stella/` family discovery, star names, hygiene reports. |
 | `identity.rs` | Agent identity registration/selection. |
@@ -279,7 +283,7 @@ primitives operation-shaped rather than entry-shaped.
 - Unit tests are colocated `#[cfg(test)] mod tests` blocks inside the modules
   (`engine-rs/src/`), not a separate `tests/` directory in the crate. Run with
   `cd engine-rs && cargo test -p stellario-engine` (also `make check`). As of
-  this writing: 58 tests, all passing (~0.3s after build).
+  this writing: 63 tests, all passing (~0.3s after build).
 - Tests lean on temp dirs and temp index files; they do not require network.
   Semantic embedding tests tolerate the model being unavailable.
 - The legacy `tests/*.ts` (vitest) do not run — see the legacy section.
@@ -298,8 +302,10 @@ primitives operation-shaped rather than entry-shaped.
   contents as authoritative.
 - `doctor` and `lint` exit non-zero on error-level findings, which makes them
   usable as gates.
-- `migrate` and `sync` mutate capsules (migrate tombstones the source with
-  intent; provenance stays in lineage) — treat them as state-changing.
+- `migrate`, `archive`, and `sync` mutate capsules (migrate tombstones the
+  source with intent; archive seals the source in place and copies it to the
+  `archived` volume; provenance stays in lineage) — treat them as
+  state-changing.
 - `install.sh` downloads a release tarball over HTTPS from GitHub but does not
   verify the accompanying `.sha256`; check it manually if you need integrity.
 - The MCP server exposes no read/write operations, only a readiness notice.
